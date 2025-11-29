@@ -13,7 +13,14 @@ export PROJECT_ID="my-library-bot"
 # Create project and enable APIs
 gcloud projects create $PROJECT_ID
 gcloud config set project $PROJECT_ID
-gcloud services enable run.googleapis.com containerregistry.googleapis.com
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com
+
+# Create Artifact Registry repository
+export REGION="europe-west4"
+gcloud artifacts repositories create cloud-run-source-deploy \
+  --repository-format=docker \
+  --location=$REGION \
+  --description="Docker repository for library bot"
 
 # Create service account
 gcloud iam service-accounts create github-actions \
@@ -28,7 +35,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${SA_EMAIL}" \
-  --role="roles/storage.admin"
+  --role="roles/artifactregistry.writer"
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${SA_EMAIL}" \

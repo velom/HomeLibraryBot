@@ -8,7 +8,7 @@ The CI/CD pipeline automatically deploys your bot to Cloud Run when you create a
 
 **What it does:**
 1. Builds Docker image on release
-2. Pushes to Google Container Registry
+2. Pushes to Google Artifact Registry
 3. Deploys to Cloud Run
 4. Configures Telegram webhook automatically
 5. Scales to zero when not in use (cost-effective!)
@@ -41,11 +41,27 @@ gcloud config set project $PROJECT_ID
 # Enable necessary APIs
 gcloud services enable \
   run.googleapis.com \
-  containerregistry.googleapis.com \
+  artifactregistry.googleapis.com \
   cloudbuild.googleapis.com
 ```
 
-### 1.3 Create a Service Account
+### 1.3 Create Artifact Registry Repository
+
+```bash
+# Set region (must match workflow REGION)
+export REGION="europe-west4"
+
+# Create Artifact Registry repository for Docker images
+gcloud artifacts repositories create cloud-run-source-deploy \
+  --repository-format=docker \
+  --location=$REGION \
+  --description="Docker repository for library bot"
+
+# Verify repository was created
+gcloud artifacts repositories list --location=$REGION
+```
+
+### 1.4 Create a Service Account
 
 Create a service account for GitHub Actions to use:
 
@@ -64,14 +80,14 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${SA_EMAIL}" \
-  --role="roles/storage.admin"
+  --role="roles/artifactregistry.writer"
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${SA_EMAIL}" \
   --role="roles/iam.serviceAccountUser"
 ```
 
-### 1.4 Create and Download Service Account Key
+### 1.5 Create and Download Service Account Key
 
 ```bash
 # Create key file
