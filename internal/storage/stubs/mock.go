@@ -1,0 +1,149 @@
+package stubs
+
+import (
+	"context"
+	"library/internal/models"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// MockDB is an in-memory implementation of the Database interface for testing
+type MockDB struct {
+	mu           sync.RWMutex
+	books        map[string]models.Book
+	participants map[string]models.Participant
+	events       []models.Event
+}
+
+// NewMockDB creates a new mock database
+func NewMockDB() *MockDB {
+	return &MockDB{
+		books:        make(map[string]models.Book),
+		participants: make(map[string]models.Participant),
+		events:       make([]models.Event, 0),
+	}
+}
+
+// Initialize sets up default participants for testing
+func (m *MockDB) Initialize(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Add default test participants
+	m.participants["Alice"] = models.Participant{
+		ID:       uuid.New().String(),
+		Name:     "Alice",
+		IsParent: false,
+	}
+	m.participants["Bob"] = models.Participant{
+		ID:       uuid.New().String(),
+		Name:     "Bob",
+		IsParent: false,
+	}
+	m.participants["Mom"] = models.Participant{
+		ID:       uuid.New().String(),
+		Name:     "Mom",
+		IsParent: true,
+	}
+	m.participants["Dad"] = models.Participant{
+		ID:       uuid.New().String(),
+		Name:     "Dad",
+		IsParent: true,
+	}
+
+	return nil
+}
+
+// CreateBook creates a new book
+func (m *MockDB) CreateBook(ctx context.Context, name, author string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	id := uuid.New().String()
+	m.books[id] = models.Book{
+		ID:         id,
+		Name:       name,
+		Author:     author,
+		IsReadable: true,
+	}
+	return id, nil
+}
+
+// ListReadableBooks returns all readable books
+func (m *MockDB) ListReadableBooks(ctx context.Context) ([]models.Book, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var books []models.Book
+	for _, book := range m.books {
+		if book.IsReadable {
+			books = append(books, book)
+		}
+	}
+
+	// Sort by name
+	sort.Slice(books, func(i, j int) bool {
+		return books[i].Name < books[j].Name
+	})
+
+	return books, nil
+}
+
+// ListParticipants returns all participants
+func (m *MockDB) ListParticipants(ctx context.Context) ([]models.Participant, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var participants []models.Participant
+	for _, p := range m.participants {
+		participants = append(participants, p)
+	}
+
+	// Sort by name
+	sort.Slice(participants, func(i, j int) bool {
+		return participants[i].Name < participants[j].Name
+	})
+
+	return participants, nil
+}
+
+// CreateEvent creates a new reading event
+func (m *MockDB) CreateEvent(ctx context.Context, date time.Time, bookName, participantName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.events = append(m.events, models.Event{
+		Date:            date,
+		BookName:        bookName,
+		ParticipantName: participantName,
+	})
+
+	return nil
+}
+
+// GetLastEvents returns the last N events
+func (m *MockDB) GetLastEvents(ctx context.Context, limit int) ([]models.Event, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Sort events by date descending
+	sortedEvents := make([]models.Event, len(m.events))
+	copy(sortedEvents, m.events)
+	sort.Slice(sortedEvents, func(i, j int) bool {
+		return sortedEvents[i].Date.After(sortedEvents[j].Date)
+	})
+
+	if limit > len(sortedEvents) {
+		limit = len(sortedEvents)
+	}
+
+	return sortedEvents[:limit], nil
+}
+
+// Close does nothing for mock DB
+func (m *MockDB) Close() error {
+	return nil
+}
