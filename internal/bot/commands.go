@@ -16,7 +16,8 @@ Available commands:
 /new_book - Register a new book
 /read - Record a reading event
 /who_is_next - See who should read next
-/last - Show last 10 reading events`
+/last - Show last 10 reading events
+/stats - View reading statistics`
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, text)
 	b.sendMessage(msg)
@@ -150,5 +151,35 @@ func (b *Bot) handleLast(ctx context.Context, message *tgbotapi.Message) {
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, text.String())
+	b.sendMessage(msg)
+}
+
+// handleStatsStart initiates the statistics conversation
+func (b *Bot) handleStatsStart(ctx context.Context, message *tgbotapi.Message) {
+	userID := message.From.ID
+	b.states[userID] = &ConversationState{
+		Command: "stats",
+		Step:    1,
+		Data:    make(map[string]interface{}),
+	}
+
+	// Show time period selection
+	msg := tgbotapi.NewMessage(message.Chat.ID, "📊 Select time period for statistics:")
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📅 Specific month", "stats_period:month"),
+			tgbotapi.NewInlineKeyboardButtonData("📅 Calendar year", "stats_period:year"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⏮ Last 2 months", "stats_period:last2"),
+			tgbotapi.NewInlineKeyboardButtonData("⏮ Last 3 months", "stats_period:last3"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⏮ Last 6 months", "stats_period:last6"),
+			tgbotapi.NewInlineKeyboardButtonData("⏮ Last 12 months", "stats_period:last12"),
+		),
+	)
+	msg.ReplyMarkup = keyboard
 	b.sendMessage(msg)
 }

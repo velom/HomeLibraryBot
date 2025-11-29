@@ -51,6 +51,8 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 			b.handleWhoIsNext(ctx, message)
 		case "last":
 			b.handleLast(ctx, message)
+		case "stats":
+			b.handleStatsStart(ctx, message)
 		default:
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Unknown command. Use /start to see available commands.")
 			b.sendMessage(msg)
@@ -90,6 +92,10 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleBookCallback(ctx, query, state)
 	} else if strings.HasPrefix(data, "participant:") {
 		b.handleParticipantCallback(ctx, query, state)
+	} else if strings.HasPrefix(data, "stats_period:") {
+		b.handleStatsPeriodCallback(ctx, query, state)
+	} else if strings.HasPrefix(data, "stats_participant:") {
+		b.handleStatsParticipantCallback(ctx, query, state)
 	}
 
 	// Clean up completed conversations
