@@ -91,15 +91,57 @@ CLICKHOUSE_USE_TLS=false
 
 Send a message to [@userinfobot](https://t.me/userinfobot) to get your Telegram user ID.
 
-### 4. Build and Run
+### 4. Database Migrations
+
+The project uses [goose](https://github.com/pressly/goose) for database migrations.
+
+```bash
+# Run all pending migrations
+make run-migrations
+
+# Check migration status
+make migration-status
+
+# Create a new migration
+make create-migration NAME=add_new_table
+
+# Rollback the last migration
+make migration-down
+```
+
+**Note:** Migrations read database credentials from your `.env` file.
+
+### 5. Build and Run
 
 The application automatically loads `.env` file from the current directory.
+
+#### Using Makefile (Recommended)
+
+```bash
+# Build all binaries
+make build
+
+# Run the main application
+make run
+
+# Run in dev mode (with auto ClickHouse)
+make run-dev
+
+# Run tests
+make test
+
+# Clean built binaries
+make clean
+```
 
 #### Option A: With Real ClickHouse
 
 ```bash
 # Install dependencies
 go mod download
+
+# Run migrations
+make run-migrations
 
 # Build
 go build -o library ./cmd/library
@@ -149,10 +191,43 @@ go run ./cmd/library-dev
 
 ## Development
 
+### Makefile Commands
+
+The project includes a Makefile with common development commands:
+
+```bash
+# Show all available commands
+make help
+
+# Build all binaries
+make build
+
+# Run tests
+make test
+
+# Run the application
+make run
+
+# Run in dev mode (with testcontainers)
+make run-dev
+
+# Database migrations
+make run-migrations          # Run pending migrations
+make migration-status        # Show migration status
+make migration-down          # Rollback last migration
+make create-migration NAME=migration_name  # Create new migration
+
+# Clean built binaries
+make clean
+```
+
 ### Running Tests
 
 ```bash
 # Run all tests
+make test
+
+# Or use go test directly
 go test ./...
 
 # Run with verbose output
@@ -181,8 +256,12 @@ go run ./cmd/library
 ├── cmd/
 │   ├── library/           # Production entry point
 │   │   └── main.go        # Minimal main (8 lines of code)
-│   └── library-dev/       # Development entry point
-│       └── main.go        # Starts ClickHouse in testcontainer
+│   ├── library-dev/       # Development entry point
+│   │   └── main.go        # Starts ClickHouse in testcontainer
+│   └── migrate/           # Database migration tool
+│       └── main.go        # Runs goose migrations
+├── migrations/            # SQL migration files
+│   └── 20250101000000_initial_schema.sql
 ├── internal/
 │   ├── app/               # Application initialization and startup
 │   │   └── app.go         # App struct, New, Run, Shutdown

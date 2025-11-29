@@ -4,8 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Go project named "library" using Go 1.25. 
-It's a single-binary application, implementing home library. Primary UI is Telegram bot, all the data is stored inside ClickHouse.
+This is a Go project named "library" using Go 1.25.
+It implements a home library management system with a Telegram bot UI and ClickHouse for data storage.
+
+### Binaries
+
+The project includes three binaries:
+1. **library** (`cmd/library/`) - Production application
+2. **library-dev** (`cmd/library-dev/`) - Development mode with auto-configured ClickHouse testcontainer
+3. **migrate** (`cmd/migrate/`) - Database migration tool using goose
+
+### Makefile
+
+A Makefile is provided with common development tasks:
+- `make build` - Build all binaries
+- `make run` / `make run-dev` - Run the application
+- `make test` - Run tests
+- `make run-migrations` - Run database migrations
+- `make create-migration NAME=...` - Create new migration
+- `make help` - Show all available commands
 
 ### User scenarios
 
@@ -37,7 +54,59 @@ A few commands:
 
 Bot works in polling mode (bot pulls updates from Telegram)
 
+## Database Migrations
+
+The project uses [goose](https://github.com/pressly/goose) for database schema migrations.
+
+### Migration Files
+
+- Location: `migrations/` directory
+- Naming: `YYYYMMDDHHMMSS_description.sql`
+- Format: SQL with goose directives (`+goose Up` and `+goose Down`)
+
+### Migration Commands
+
+```bash
+# Run all pending migrations
+make run-migrations
+
+# Check migration status
+make migration-status
+
+# Create a new migration
+make create-migration NAME=add_column_to_books
+
+# Rollback the last migration
+make migration-down
+```
+
+### Migration Binary
+
+The `cmd/migrate` binary reads database credentials from `.env` file and runs migrations.
+
 ## Building and Running
+
+### Using Makefile (Recommended)
+
+```bash
+# Show all available commands
+make help
+
+# Build all binaries
+make build
+
+# Run the application
+make run
+
+# Run in dev mode (with auto ClickHouse)
+make run-dev
+
+# Run tests
+make test
+
+# Clean built binaries
+make clean
+```
 
 ### Production Mode
 
@@ -60,9 +129,8 @@ For local development, use the dev binary that automatically manages ClickHouse 
 # Run directly (recommended for development)
 go run ./cmd/library-dev
 
-# Build and run
-go build -o library-dev ./cmd/library-dev
-./library-dev
+# Or use Makefile
+make run-dev
 ```
 
 **Requirements:** Docker must be running.
@@ -77,6 +145,9 @@ go build -o library-dev ./cmd/library-dev
 
 ```bash
 # Run all tests
+make test
+
+# Or use go test directly
 go test ./...
 
 # Run tests with verbose output
@@ -128,8 +199,12 @@ The application follows a clean architecture pattern with clear separation of co
 ├── cmd/
 │   ├── library/              # Production entry point
 │   │   └── main.go           # Minimal main (8 lines of code)
-│   └── library-dev/          # Development entry point
-│       └── main.go           # Starts ClickHouse in testcontainer
+│   ├── library-dev/          # Development entry point
+│   │   └── main.go           # Starts ClickHouse in testcontainer
+│   └── migrate/              # Database migration tool
+│       └── main.go           # Runs goose migrations (reads .env)
+├── migrations/               # SQL migration files
+│   └── 20250101000000_initial_schema.sql
 ├── internal/
 │   ├── app/                  # Application initialization and lifecycle
 │   │   └── app.go           # App struct, New, Run, Shutdown

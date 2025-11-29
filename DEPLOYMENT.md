@@ -185,11 +185,11 @@ gcloud run deploy library-bot \
     --max-instances 1 \
     --memory 256Mi \
     --cpu 1 \
-    --set-env-vars "TELEGRAM_BOT_TOKEN=8539385278:AAFM2awsytEmb0chAUtavP5pNkJGKG92XK8" \
-    --set-env-vars "ALLOWED_USER_IDS=95054469,190369767" \
-    --set-env-vars "CLICKHOUSE_HOST=m2jqmrypo3.europe-west4.gcp.clickhouse.cloud" \
-    --set-env-vars "CLICKHOUSE_PORT=9440" \
-    --set-env-vars "CLICKHOUSE_PASSWORD=zhc_5qsWrbwbb" \
+    --set-env-vars "TELEGRAM_BOT_TOKEN=asd" \
+    --set-env-vars "ALLOWED_USER_IDS=asd" \
+    --set-env-vars "CLICKHOUSE_HOST=qwe" \
+    --set-env-vars "CLICKHOUSE_PORT=9000" \
+    --set-env-vars "CLICKHOUSE_PASSWORD=qwerty" \
     --set-env-vars "USE_MOCK_DB=false"
 ```
 
