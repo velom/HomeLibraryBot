@@ -6,8 +6,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // MockDB is an in-memory implementation of the Database interface for testing
@@ -34,22 +32,18 @@ func (m *MockDB) Initialize(ctx context.Context) error {
 
 	// Add default test participants
 	m.participants["Alice"] = models.Participant{
-		ID:       uuid.New().String(),
 		Name:     "Alice",
 		IsParent: false,
 	}
 	m.participants["Bob"] = models.Participant{
-		ID:       uuid.New().String(),
 		Name:     "Bob",
 		IsParent: false,
 	}
 	m.participants["Mom"] = models.Participant{
-		ID:       uuid.New().String(),
 		Name:     "Mom",
 		IsParent: true,
 	}
 	m.participants["Dad"] = models.Participant{
-		ID:       uuid.New().String(),
 		Name:     "Dad",
 		IsParent: true,
 	}
@@ -57,19 +51,17 @@ func (m *MockDB) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// CreateBook creates a new book
+// CreateBook creates a new book and returns the book name as identifier
 func (m *MockDB) CreateBook(ctx context.Context, name, author string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	id := uuid.New().String()
-	m.books[id] = models.Book{
-		ID:         id,
+	m.books[name] = models.Book{
 		Name:       name,
 		Author:     author,
 		IsReadable: true,
 	}
-	return id, nil
+	return name, nil
 }
 
 // ListReadableBooks returns all readable books
