@@ -9,6 +9,7 @@ env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   SERVICE_NAME: library-bot
   REGION: europe-west4
+  AR_REPOSITORY: cloud-run-source-deploy  # Artifact Registry repository name
 
 jobs:
   deploy:
@@ -31,14 +32,14 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure Docker for GCR
+      - name: Configure Docker for Artifact Registry
         run: |
-          gcloud auth configure-docker
+          gcloud auth configure-docker $REGION-docker.pkg.dev
 
       - name: Build and push Docker image
         run: |
-          IMAGE_NAME="gcr.io/$PROJECT_ID/$SERVICE_NAME:${{ github.sha }}"
-          IMAGE_LATEST="gcr.io/$PROJECT_ID/$SERVICE_NAME:latest"
+          IMAGE_NAME="$REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPOSITORY/$SERVICE_NAME:${{ github.sha }}"
+          IMAGE_LATEST="$REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPOSITORY/$SERVICE_NAME:latest"
 
           docker build -t $IMAGE_NAME -t $IMAGE_LATEST .
           docker push $IMAGE_NAME

@@ -16,7 +16,7 @@ This directory contains GitHub-specific configuration files.
 1. You create a release (tag) on GitHub
 2. GitHub Actions automatically:
    - Builds Docker image
-   - Pushes to Google Container Registry
+   - Pushes to Google Artifact Registry
    - Deploys to Cloud Run
    - Configures Telegram webhook
 3. Your bot is live with zero downtime!
