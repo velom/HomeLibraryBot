@@ -19,6 +19,8 @@ func (b *Bot) handleConversation(ctx context.Context, message *tgbotapi.Message,
 		b.handleNewBookConversation(ctx, message, state)
 	case "read":
 		b.handleReadConversation(ctx, message, state)
+	case "stats":
+		b.handleStatsConversation(ctx, message, state)
 	}
 
 	// Clean up completed conversations
@@ -193,5 +195,61 @@ func (b *Bot) handleReadConversation(ctx context.Context, message *tgbotapi.Mess
 		}
 
 		state.Step = -1 // Mark conversation as complete
+	}
+}
+
+// handleStatsConversation handles the statistics multi-step process
+func (b *Bot) handleStatsConversation(ctx context.Context, message *tgbotapi.Message, state *ConversationState) {
+	switch state.Step {
+	case 1: // Waiting for month or year input
+		// Check if we're awaiting month
+		if _, ok := state.Data["awaiting_month"]; ok {
+			// Parse month in YYYY-MM format
+			date, err := time.Parse("2006-01", message.Text)
+			if err != nil {
+				msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Invalid month format. Please use YYYY-MM\n\nExample: 2024-11")
+				b.sendMessage(msg)
+				return
+			}
+
+			// Calculate start and end dates for the month
+			startDate := time.Date(date.Year(), date.Month(), 1, 0, 0, 0, 0, time.UTC)
+			endDate := startDate.AddDate(0, 1, 0).Add(-time.Second)
+
+			delete(state.Data, "awaiting_month")
+			state.Data["start_date"] = startDate
+			state.Data["end_date"] = endDate
+			state.Data["period_label"] = date.Format("January 2006")
+			state.Step = 2
+
+			// Show participant selection
+			b.showParticipantSelectionForStats(ctx, message.Chat.ID)
+			return
+		}
+
+		// Check if we're awaiting year
+		if _, ok := state.Data["awaiting_year"]; ok {
+			// Parse year
+			year, err := strconv.Atoi(message.Text)
+			if err != nil || year < 1900 || year > 2100 {
+				msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Invalid year. Please enter a valid year\n\nExample: 2024")
+				b.sendMessage(msg)
+				return
+			}
+
+			// Calculate start and end dates for the year
+			startDate := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
+			endDate := time.Date(year, 12, 31, 23, 59, 59, 0, time.UTC)
+
+			delete(state.Data, "awaiting_year")
+			state.Data["start_date"] = startDate
+			state.Data["end_date"] = endDate
+			state.Data["period_label"] = fmt.Sprintf("Year %d", year)
+			state.Step = 2
+
+			// Show participant selection
+			b.showParticipantSelectionForStats(ctx, message.Chat.ID)
+			return
+		}
 	}
 }

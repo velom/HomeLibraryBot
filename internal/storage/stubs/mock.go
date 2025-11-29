@@ -134,6 +134,64 @@ func (m *MockDB) GetLastEvents(ctx context.Context, limit int) ([]models.Event, 
 	return sortedEvents[:limit], nil
 }
 
+// GetTopBooks returns top N books by read count within the specified time period
+// If participantName is empty, returns statistics for all children (IsParent=false)
+// If participantName is provided, returns statistics only for that participant
+func (m *MockDB) GetTopBooks(ctx context.Context, limit int, startDate, endDate time.Time, participantName string) ([]models.BookStat, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Count books
+	bookCounts := make(map[string]int)
+
+	for _, event := range m.events {
+		// Filter by date range
+		if event.Date.Before(startDate) || event.Date.After(endDate) {
+			continue
+		}
+
+		// Filter by participant
+		if participantName != "" {
+			// Specific participant
+			if event.ParticipantName != participantName {
+				continue
+			}
+		} else {
+			// All children (not parents)
+			participant, exists := m.participants[event.ParticipantName]
+			if !exists || participant.IsParent {
+				continue
+			}
+		}
+
+		bookCounts[event.BookName]++
+	}
+
+	// Convert to slice
+	var stats []models.BookStat
+	for bookName, count := range bookCounts {
+		stats = append(stats, models.BookStat{
+			BookName:  bookName,
+			ReadCount: count,
+		})
+	}
+
+	// Sort by count descending, then by name
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].ReadCount != stats[j].ReadCount {
+			return stats[i].ReadCount > stats[j].ReadCount
+		}
+		return stats[i].BookName < stats[j].BookName
+	})
+
+	// Limit results
+	if limit > 0 && limit < len(stats) {
+		stats = stats[:limit]
+	}
+
+	return stats, nil
+}
+
 // Close does nothing for mock DB
 func (m *MockDB) Close() error {
 	return nil

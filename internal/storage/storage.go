@@ -20,6 +20,12 @@ type Storage interface {
 	CreateEvent(ctx context.Context, date time.Time, bookName, participantName string) error
 	GetLastEvents(ctx context.Context, limit int) ([]models.Event, error)
 
+	// Statistics operations
+	// GetTopBooks returns top N books by read count within the specified time period
+	// If participantName is empty, returns statistics for all children (IsParent=false)
+	// If participantName is provided, returns statistics only for that participant
+	GetTopBooks(ctx context.Context, limit int, startDate, endDate time.Time, participantName string) ([]models.BookStat, error)
+
 	// Lifecycle
 	Initialize(ctx context.Context) error
 	Close() error

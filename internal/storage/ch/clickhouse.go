@@ -133,6 +133,63 @@ func (db *ClickHouseDB) GetLastEvents(ctx context.Context, limit int) ([]models.
 	return events, nil
 }
 
+// GetTopBooks returns top N books by read count within the specified time period
+// If participantName is empty, returns statistics for all children (IsParent=false)
+// If participantName is provided, returns statistics only for that participant
+func (db *ClickHouseDB) GetTopBooks(ctx context.Context, limit int, startDate, endDate time.Time, participantName string) ([]models.BookStat, error) {
+	var query string
+	var args []interface{}
+
+	if participantName == "" {
+		// Get stats for all children
+		query = `
+			SELECT
+				e.book_name,
+				COUNT(*) as read_count
+			FROM events e
+			INNER JOIN participants p ON e.participant_name = p.name
+			WHERE e.date >= ?
+				AND e.date <= ?
+				AND p.is_parent = false
+			GROUP BY e.book_name
+			ORDER BY read_count DESC, e.book_name ASC
+			LIMIT ?
+		`
+		args = []interface{}{startDate, endDate, limit}
+	} else {
+		// Get stats for specific participant
+		query = `
+			SELECT
+				book_name,
+				COUNT(*) as read_count
+			FROM events
+			WHERE date >= ?
+				AND date <= ?
+				AND participant_name = ?
+			GROUP BY book_name
+			ORDER BY read_count DESC, book_name ASC
+			LIMIT ?
+		`
+		args = []interface{}{startDate, endDate, participantName, limit}
+	}
+
+	rows, err := db.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get top books: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []models.BookStat
+	for rows.Next() {
+		var stat models.BookStat
+		if err := rows.Scan(&stat.BookName, &stat.ReadCount); err != nil {
+			return nil, fmt.Errorf("failed to scan book stat: %w", err)
+		}
+		stats = append(stats, stat)
+	}
+	return stats, nil
+}
+
 // Close closes the database connection
 func (db *ClickHouseDB) Close() error {
 	if db.conn != nil {

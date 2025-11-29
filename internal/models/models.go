@@ -20,3 +20,9 @@ type Event struct {
 	BookName        string
 	ParticipantName string
 }
+
+// BookStat represents book reading statistics
+type BookStat struct {
+	BookName  string
+	ReadCount int
+}
