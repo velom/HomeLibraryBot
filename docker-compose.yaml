@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # ClickHouse database
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: library-clickhouse
+    ports:
+      - "8123:8123"  # HTTP interface
+      - "9000:9000"  # Native protocol
+    environment:
+      CLICKHOUSE_DB: library
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    networks:
+      - library-network
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Telegram bot application
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: library-bot
+    ports:
+      - "8080:8080"
+    environment:
+      # Telegram configuration
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      ALLOWED_USER_IDS: ${ALLOWED_USER_IDS}
+
+      # Database configuration
+      USE_MOCK_DB: "false"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "9000"
+      CLICKHOUSE_DATABASE: library
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_USE_TLS: "false"
+
+      # Cloud Run port
+      PORT: "8080"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - library-network
+    restart: unless-stopped
+
+networks:
+  library-network:
+    driver: bridge
+
+volumes:
+  clickhouse_data:

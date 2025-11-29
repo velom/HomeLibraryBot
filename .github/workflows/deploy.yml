@@ -1,0 +1,78 @@
+name: Deploy to Cloud Run
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: # Allows manual trigger
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE_NAME: library-bot
+  REGION: europe-west4
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: |
+          gcloud auth configure-docker
+
+      - name: Build and push Docker image
+        run: |
+          IMAGE_NAME="gcr.io/$PROJECT_ID/$SERVICE_NAME:${{ github.sha }}"
+          IMAGE_LATEST="gcr.io/$PROJECT_ID/$SERVICE_NAME:latest"
+
+          docker build -t $IMAGE_NAME -t $IMAGE_LATEST .
+          docker push $IMAGE_NAME
+          docker push $IMAGE_LATEST
+
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy $SERVICE_NAME \
+            --image $IMAGE_NAME \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --min-instances 0 \
+            --max-instances 1 \
+            --memory 512Mi \
+            --cpu 1 \
+            --set-env-vars="^|^TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}|\
+            ALLOWED_USER_IDS=${{ secrets.ALLOWED_USER_IDS }}|\
+            CLICKHOUSE_HOST=${{ secrets.CLICKHOUSE_HOST }}|\
+            CLICKHOUSE_PORT=${{ secrets.CLICKHOUSE_PORT }}|\
+            CLICKHOUSE_DATABASE=${{ secrets.CLICKHOUSE_DATABASE }}|\
+            CLICKHOUSE_USER=${{ secrets.CLICKHOUSE_USER }}|\
+            CLICKHOUSE_PASSWORD=${{ secrets.CLICKHOUSE_PASSWORD }}|\
+            CLICKHOUSE_USE_TLS=${{ secrets.CLICKHOUSE_USE_TLS }}|\
+            WEBHOOK_MODE=true|\
+            WEBHOOK_URL=${{ secrets.WEBHOOK_URL }}"
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Successfully deployed **$SERVICE_NAME** to Cloud Run" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region:** $REGION" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image:** $IMAGE_NAME" >> $GITHUB_STEP_SUMMARY
