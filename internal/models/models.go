@@ -4,7 +4,6 @@ import "time"
 
 // Book represents a book in the library
 type Book struct {
-	ID         string
 	Name       string
 	Author     string
 	IsReadable bool
@@ -12,7 +11,6 @@ type Book struct {
 
 // Participant represents a family member
 type Participant struct {
-	ID       string
 	Name     string
 	IsParent bool
 }

@@ -1,21 +1,31 @@
 -- +goose Up
 -- +goose StatementBegin
+DROP TABLE IF EXISTS books;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+DROP TABLE IF EXISTS participants;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+DROP TABLE IF EXISTS events;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS books (
-    id String,
     name String,
     author String,
     is_readable Bool
 ) ENGINE = MergeTree()
-ORDER BY id;
+ORDER BY name;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS participants (
-    id String,
     name String,
     is_parent Bool
 ) ENGINE = MergeTree()
-ORDER BY id;
+ORDER BY name;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
