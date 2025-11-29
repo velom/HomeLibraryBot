@@ -10,7 +10,7 @@ import (
 // Storage defines the interface for data storage operations
 type Storage interface {
 	// Book operations
-	CreateBook(ctx context.Context, name, author string) (string, error)
+	CreateBook(ctx context.Context, name string) (string, error)
 	ListReadableBooks(ctx context.Context) ([]models.Book, error)
 
 	// Participant operations

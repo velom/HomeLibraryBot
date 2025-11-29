@@ -16,7 +16,7 @@ func TestMockDB_CreateBook(t *testing.T) {
 	}
 
 	// Create a book
-	id, err := db.CreateBook(ctx, "Test Book", "Test Author")
+	id, err := db.CreateBook(ctx, "Test Book")
 	if err != nil {
 		t.Fatalf("Failed to create book: %v", err)
 	}
@@ -35,8 +35,8 @@ func TestMockDB_CreateBook(t *testing.T) {
 		t.Errorf("Expected 1 book, got %d", len(books))
 	}
 
-	if books[0].Name != "Test Book" || books[0].Author != "Test Author" {
-		t.Errorf("Expected 'Test Book' by 'Test Author', got '%s' by '%s'", books[0].Name, books[0].Author)
+	if books[0].Name != "Test Book" {
+		t.Errorf("Expected 'Test Book', got '%s'", books[0].Name)
 	}
 
 	if !books[0].IsReadable {
@@ -53,9 +53,9 @@ func TestMockDB_ListReadableBooks(t *testing.T) {
 	}
 
 	// Create multiple books
-	_, _ = db.CreateBook(ctx, "Book A", "Author 1")
-	_, _ = db.CreateBook(ctx, "Book B", "Author 2")
-	_, _ = db.CreateBook(ctx, "Book C", "Author 3")
+	_, _ = db.CreateBook(ctx, "Book A")
+	_, _ = db.CreateBook(ctx, "Book B")
+	_, _ = db.CreateBook(ctx, "Book C")
 
 	// List readable books
 	books, err := db.ListReadableBooks(ctx)
@@ -114,7 +114,7 @@ func TestMockDB_Events(t *testing.T) {
 	}
 
 	// Create a book
-	_, err := db.CreateBook(ctx, "Test Book", "Test Author")
+	_, err := db.CreateBook(ctx, "Test Book")
 	if err != nil {
 		t.Fatalf("Failed to create book: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestMockDB_GetLastEvents_Limit(t *testing.T) {
 	}
 
 	// Create a book
-	_, err := db.CreateBook(ctx, "Test Book", "Test Author")
+	_, err := db.CreateBook(ctx, "Test Book")
 	if err != nil {
 		t.Fatalf("Failed to create book: %v", err)
 	}

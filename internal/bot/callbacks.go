@@ -48,16 +48,23 @@ func (b *Bot) handleDateCallback(ctx context.Context, query *tgbotapi.CallbackQu
 		return
 	}
 
-	// Create inline keyboard for book selection
+	// Create inline keyboard for book selection (2 columns)
 	msg := tgbotapi.NewMessage(query.Message.Chat.ID, "📚 Select a book:")
 
 	var rows [][]tgbotapi.InlineKeyboardButton
+	var currentRow []tgbotapi.InlineKeyboardButton
 	for i, book := range books {
 		button := tgbotapi.NewInlineKeyboardButtonData(
-			fmt.Sprintf("%s by %s", book.Name, book.Author),
+			book.Name,
 			fmt.Sprintf("book:%d", i),
 		)
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(button))
+		currentRow = append(currentRow, button)
+
+		// Add row when we have 2 buttons or it's the last book
+		if len(currentRow) == 2 || i == len(books)-1 {
+			rows = append(rows, currentRow)
+			currentRow = []tgbotapi.InlineKeyboardButton{}
+		}
 	}
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)

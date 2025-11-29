@@ -52,7 +52,7 @@ func TestBot_NewBookConversation(t *testing.T) {
 		t.Errorf("Expected step 1, got %d", state.Step)
 	}
 
-	// Step 2: Provide book name
+	// Step 2: Provide book name (conversation completes immediately)
 	message2 := &tgbotapi.Message{
 		From: &tgbotapi.User{ID: userID},
 		Chat: &tgbotapi.Chat{ID: chatID},
@@ -60,22 +60,6 @@ func TestBot_NewBookConversation(t *testing.T) {
 	}
 
 	bot.handleNewBookConversation(ctx, message2, state)
-
-	if state.Step != 2 {
-		t.Errorf("Expected step 2, got %d", state.Step)
-	}
-	if state.Data["name"] != "Test Book" {
-		t.Errorf("Expected book name 'Test Book', got '%v'", state.Data["name"])
-	}
-
-	// Step 3: Provide author name
-	message3 := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
-		Text: "Test Author",
-	}
-
-	bot.handleNewBookConversation(ctx, message3, state)
 
 	if state.Step != -1 {
 		t.Errorf("Expected step -1 (completed), got %d", state.Step)
@@ -91,13 +75,13 @@ func TestBot_NewBookConversation(t *testing.T) {
 	}
 	found := false
 	for _, book := range books {
-		if book.Name == "Test Book" && book.Author == "Test Author" {
+		if book.Name == "Test Book" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("Expected to find 'Test Book' by 'Test Author' in books list")
+		t.Error("Expected to find 'Test Book' in books list")
 	}
 }
 
@@ -110,7 +94,7 @@ func TestBot_ReadConversation(t *testing.T) {
 	}
 
 	// Create a test book
-	_, err := db.CreateBook(ctx, "Test Book", "Test Author")
+	_, err := db.CreateBook(ctx, "Test Book")
 	if err != nil {
 		t.Fatalf("Failed to create book: %v", err)
 	}
@@ -168,7 +152,7 @@ func TestBot_InvalidBookSelection(t *testing.T) {
 	}
 
 	// Create a test book
-	_, err := db.CreateBook(ctx, "Test Book", "Test Author")
+	_, err := db.CreateBook(ctx, "Test Book")
 	if err != nil {
 		t.Fatalf("Failed to create book: %v", err)
 	}
@@ -351,7 +335,7 @@ func TestBot_CommandInterruptsConversation(t *testing.T) {
 	}
 
 	// Create a book so /read can be started
-	_, err := db.CreateBook(ctx, "Test Book", "Test Author")
+	_, err := db.CreateBook(ctx, "Test Book")
 	if err != nil {
 		t.Fatalf("Failed to create book: %v", err)
 	}

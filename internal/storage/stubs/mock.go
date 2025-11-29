@@ -52,13 +52,12 @@ func (m *MockDB) Initialize(ctx context.Context) error {
 }
 
 // CreateBook creates a new book and returns the book name as identifier
-func (m *MockDB) CreateBook(ctx context.Context, name, author string) (string, error) {
+func (m *MockDB) CreateBook(ctx context.Context, name string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.books[name] = models.Book{
 		Name:       name,
-		Author:     author,
 		IsReadable: true,
 	}
 	return name, nil
