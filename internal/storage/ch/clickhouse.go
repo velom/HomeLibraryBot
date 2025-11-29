@@ -57,9 +57,9 @@ func (db *ClickHouseDB) Initialize(ctx context.Context) error {
 }
 
 // CreateBook creates a new book and returns the book name as identifier
-func (db *ClickHouseDB) CreateBook(ctx context.Context, name, author string) (string, error) {
-	err := db.conn.Exec(ctx, `INSERT INTO books (name, author, is_readable) VALUES (?, ?, ?)`,
-		name, author, true)
+func (db *ClickHouseDB) CreateBook(ctx context.Context, name string) (string, error) {
+	err := db.conn.Exec(ctx, `INSERT INTO books (name, is_readable) VALUES (?, ?)`,
+		name, true)
 	if err != nil {
 		return "", fmt.Errorf("failed to create book: %w", err)
 	}
@@ -68,7 +68,7 @@ func (db *ClickHouseDB) CreateBook(ctx context.Context, name, author string) (st
 
 // ListReadableBooks returns all books that are available to read
 func (db *ClickHouseDB) ListReadableBooks(ctx context.Context) ([]models.Book, error) {
-	rows, err := db.conn.Query(ctx, `SELECT name, author, is_readable FROM books WHERE is_readable = true ORDER BY name`)
+	rows, err := db.conn.Query(ctx, `SELECT name, is_readable FROM books WHERE is_readable = true ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list readable books: %w", err)
 	}
@@ -77,7 +77,7 @@ func (db *ClickHouseDB) ListReadableBooks(ctx context.Context) ([]models.Book, e
 	var books []models.Book
 	for rows.Next() {
 		var book models.Book
-		if err := rows.Scan(&book.Name, &book.Author, &book.IsReadable); err != nil {
+		if err := rows.Scan(&book.Name, &book.IsReadable); err != nil {
 			return nil, fmt.Errorf("failed to scan book: %w", err)
 		}
 		books = append(books, book)

@@ -5,7 +5,6 @@ import "time"
 // Book represents a book in the library
 type Book struct {
 	Name       string
-	Author     string
 	IsReadable bool
 }
 

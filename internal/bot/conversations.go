@@ -31,22 +31,14 @@ func (b *Bot) handleConversation(ctx context.Context, message *tgbotapi.Message,
 func (b *Bot) handleNewBookConversation(ctx context.Context, message *tgbotapi.Message, state *ConversationState) {
 	switch state.Step {
 	case 1: // Waiting for book name
-		state.Data["name"] = message.Text
-		state.Step = 2
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Please enter the author name:")
-		b.sendMessage(msg)
+		name := message.Text
 
-	case 2: // Waiting for author name
-		state.Data["author"] = message.Text
-		name := state.Data["name"].(string)
-		author := state.Data["author"].(string)
-
-		id, err := b.db.CreateBook(ctx, name, author)
+		id, err := b.db.CreateBook(ctx, name)
 		if err != nil {
 			msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error creating book: %v", err))
 			b.sendMessage(msg)
 		} else {
-			text := fmt.Sprintf("Book created successfully!\nID: %s\nName: %s\nAuthor: %s", id, name, author)
+			text := fmt.Sprintf("Book created successfully!\nName: %s", id)
 			msg := tgbotapi.NewMessage(message.Chat.ID, text)
 			b.sendMessage(msg)
 		}
@@ -93,16 +85,23 @@ func (b *Bot) handleReadConversation(ctx context.Context, message *tgbotapi.Mess
 			return
 		}
 
-		// Create inline keyboard for book selection
+		// Create inline keyboard for book selection (2 columns)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "📚 Select a book:")
 
 		var rows [][]tgbotapi.InlineKeyboardButton
+		var currentRow []tgbotapi.InlineKeyboardButton
 		for i, book := range books {
 			button := tgbotapi.NewInlineKeyboardButtonData(
-				fmt.Sprintf("%s by %s", book.Name, book.Author),
+				book.Name,
 				fmt.Sprintf("book:%d", i),
 			)
-			rows = append(rows, tgbotapi.NewInlineKeyboardRow(button))
+			currentRow = append(currentRow, button)
+
+			// Add row when we have 2 buttons or it's the last book
+			if len(currentRow) == 2 || i == len(books)-1 {
+				rows = append(rows, currentRow)
+				currentRow = []tgbotapi.InlineKeyboardButton{}
+			}
 		}
 
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)

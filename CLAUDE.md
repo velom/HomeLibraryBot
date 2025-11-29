@@ -38,17 +38,17 @@ A Makefile is provided with common development tasks:
 Main implementation is built over ClickHouse. Storage layer (`internal/storage/`) contains an Interface, ClickHouse implementation (`ch/`), and mocks (`stubs/`).
 Most of tests should run over mocks, implementation tests should run over testcontainer with clickhouse.
 
-Three tables: 
-1. Books (ID, Name, Author, IsReadable)
-2. Participants (ID, Name, IsParent)
+Three tables:
+1. Books (Name, IsReadable) - Name is the primary key
+2. Participants (Name, IsParent) - Name is the primary key
 3. Events (Date, BookName, ParticipantName)
 
 #### Telegram Bot
 
 Only configured accounts must be able to communicate with the bot.
 A few commands:
-1. /new_book - register new book. Ask a Name and an Author
-2. /read - create and event. Ask a date (suggested: today), ask a book name (should pickable from the list of books with IsReadable flag), ask a Participant (from the list).
+1. /new_book - register new book. Ask only for a Name (single step)
+2. /read - create an event. Ask a date (suggested: today), ask a book name (pickable from the list of books with IsReadable flag in 2-column inline keyboard), ask a Participant (from the list).
 3. /who_is_next - identify next Participant.
 4. /last - show 10 last events
 
@@ -83,6 +83,33 @@ make migration-down
 ### Migration Binary
 
 The `cmd/migrate` binary reads database credentials from `.env` file and runs migrations.
+
+### Migration Best Practices
+
+**IMPORTANT: NEVER edit existing migration files that have been committed or run in any environment.**
+
+Instead of editing existing migrations:
+1. **Create a new migration** to modify the schema
+2. Use descriptive names for migrations (e.g., `remove_author_column`, `add_index_to_books`)
+3. Always provide both `Up` and `Down` migrations for rollback capability
+
+**Example: Removing a column**
+```bash
+# WRONG: Editing migrations/20250101000000_initial_schema.sql to remove author column
+# RIGHT: Creating a new migration
+make create-migration NAME=remove_author_column
+```
+
+**Why?**
+- Migrations may have already run in production/staging
+- Editing migrations breaks migration history and version tracking
+- Other developers may have already run the original migration
+- Ensures reproducible database state across all environments
+
+**ClickHouse-specific notes:**
+- Use `ALTER TABLE DROP COLUMN` to remove columns
+- Use `ALTER TABLE ADD COLUMN` to add columns
+- See `migrations/20251129225126_remove_author_column.sql` for an example
 
 ## Building and Running
 
