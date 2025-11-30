@@ -145,7 +145,7 @@ func (db *ClickHouseDB) GetTopBooks(ctx context.Context, limit int, startDate, e
 		query = `
 			SELECT
 				e.book_name,
-				COUNT(*) as read_count
+				toInt32(COUNT(*)) as read_count
 			FROM events e
 			INNER JOIN participants p ON e.participant_name = p.name
 			WHERE e.date >= ?
@@ -161,7 +161,7 @@ func (db *ClickHouseDB) GetTopBooks(ctx context.Context, limit int, startDate, e
 		query = `
 			SELECT
 				book_name,
-				COUNT(*) as read_count
+				toInt32(COUNT(*)) as read_count
 			FROM events
 			WHERE date >= ?
 				AND date <= ?
@@ -181,11 +181,15 @@ func (db *ClickHouseDB) GetTopBooks(ctx context.Context, limit int, startDate, e
 
 	var stats []models.BookStat
 	for rows.Next() {
-		var stat models.BookStat
-		if err := rows.Scan(&stat.BookName, &stat.ReadCount); err != nil {
+		var bookName string
+		var readCount int32
+		if err := rows.Scan(&bookName, &readCount); err != nil {
 			return nil, fmt.Errorf("failed to scan book stat: %w", err)
 		}
-		stats = append(stats, stat)
+		stats = append(stats, models.BookStat{
+			BookName:  bookName,
+			ReadCount: int(readCount),
+		})
 	}
 	return stats, nil
 }
