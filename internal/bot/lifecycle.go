@@ -1,19 +1,18 @@
 package bot
 
 import (
-	"log"
-
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 // Start starts the bot in polling mode
 func (b *Bot) Start() error {
-	log.Println("Starting bot in polling mode...")
+	b.logger.Info("Starting bot in polling mode")
 
 	// Remove webhook (if any was set previously)
 	_, err := b.api.Request(tgbotapi.DeleteWebhookConfig{})
 	if err != nil {
-		log.Printf("Warning: failed to delete webhook: %v", err)
+		b.logger.Warn("Failed to delete webhook", zap.Error(err))
 	}
 
 	// Create update configuration
@@ -23,7 +22,7 @@ func (b *Bot) Start() error {
 	// Get updates channel
 	updates := b.api.GetUpdatesChan(u)
 
-	log.Printf("Bot started successfully. Waiting for updates...")
+	b.logger.Info("Bot started successfully. Waiting for updates...")
 
 	// Handle updates (blocks here)
 	b.handleUpdates(updates)
@@ -32,7 +31,7 @@ func (b *Bot) Start() error {
 
 // StartWebhook sets up the bot to receive updates via webhook
 func (b *Bot) StartWebhook(webhookURL string) error {
-	log.Printf("Setting up webhook at: %s", webhookURL)
+	b.logger.Info("Setting up webhook", zap.String("webhook_url", webhookURL))
 
 	// Configure webhook
 	webhookConfig, _ := tgbotapi.NewWebhook(webhookURL + "/telegram-webhook")
@@ -40,19 +39,22 @@ func (b *Bot) StartWebhook(webhookURL string) error {
 
 	_, err := b.api.Request(webhookConfig)
 	if err != nil {
+		b.logger.Error("Failed to set webhook", zap.Error(err), zap.String("webhook_url", webhookURL))
 		return err
 	}
 
 	// Get webhook info to verify
 	info, err := b.api.GetWebhookInfo()
 	if err != nil {
-		log.Printf("Warning: failed to get webhook info: %v", err)
+		b.logger.Warn("Failed to get webhook info", zap.Error(err))
 	} else {
-		log.Printf("Webhook set successfully: %s", info.URL)
-		log.Printf("Pending updates: %d", info.PendingUpdateCount)
+		b.logger.Info("Webhook set successfully",
+			zap.String("url", info.URL),
+			zap.Int("pending_updates", info.PendingUpdateCount),
+		)
 	}
 
-	log.Println("Bot configured for webhook mode")
+	b.logger.Info("Bot configured for webhook mode")
 	return nil
 }
 
@@ -62,6 +64,13 @@ func (b *Bot) HandleWebhookUpdate(update tgbotapi.Update) {
 	if update.Message != nil {
 		userID := update.Message.From.ID
 		if !b.allowedUsers[userID] {
+			b.logger.Warn("Unauthorized access attempt",
+				zap.Int64("user_id", userID),
+				zap.String("username", update.Message.From.UserName),
+				zap.String("first_name", update.Message.From.FirstName),
+				zap.String("last_name", update.Message.From.LastName),
+				zap.String("text", update.Message.Text),
+			)
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Sorry, you are not authorized to use this bot.")
 			b.sendMessage(msg)
 			return
@@ -73,6 +82,11 @@ func (b *Bot) HandleWebhookUpdate(update tgbotapi.Update) {
 	if update.CallbackQuery != nil {
 		userID := update.CallbackQuery.From.ID
 		if !b.allowedUsers[userID] {
+			b.logger.Warn("Unauthorized callback query attempt",
+				zap.Int64("user_id", userID),
+				zap.String("username", update.CallbackQuery.From.UserName),
+				zap.String("callback_data", update.CallbackQuery.Data),
+			)
 			return
 		}
 		b.handleCallbackQuery(update.CallbackQuery)

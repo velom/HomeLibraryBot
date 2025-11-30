@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 // handleStart shows welcome message and available commands
@@ -43,12 +44,17 @@ func (b *Bot) handleReadStart(ctx context.Context, message *tgbotapi.Message) {
 	// Get readable books
 	books, err := b.db.ListReadableBooks(ctx)
 	if err != nil {
+		b.logger.Error("Failed to list readable books",
+			zap.Error(err),
+			zap.Int64("user_id", userID),
+		)
 		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
 		b.sendMessage(msg)
 		return
 	}
 
 	if len(books) == 0 {
+		b.logger.Info("No readable books available", zap.Int64("user_id", userID))
 		msg := tgbotapi.NewMessage(message.Chat.ID, "No readable books available. Please add books first with /new_book")
 		b.sendMessage(msg)
 		return
@@ -86,12 +92,17 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *tgbotapi.Message) {
 	// Get all participants
 	participants, err := b.db.ListParticipants(ctx)
 	if err != nil {
+		b.logger.Error("Failed to list participants",
+			zap.Error(err),
+			zap.Int64("user_id", message.From.ID),
+		)
 		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
 		b.sendMessage(msg)
 		return
 	}
 
 	if len(participants) == 0 {
+		b.logger.Warn("No participants found", zap.Int64("user_id", message.From.ID))
 		msg := tgbotapi.NewMessage(message.Chat.ID, "No participants found in database")
 		b.sendMessage(msg)
 		return
@@ -100,6 +111,10 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *tgbotapi.Message) {
 	// Get the last event to determine last reader
 	events, err := b.db.GetLastEvents(ctx, 1)
 	if err != nil {
+		b.logger.Error("Failed to get last events",
+			zap.Error(err),
+			zap.Int64("user_id", message.From.ID),
+		)
 		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
 		b.sendMessage(msg)
 		return
@@ -129,16 +144,26 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *tgbotapi.Message) {
 func (b *Bot) handleLast(ctx context.Context, message *tgbotapi.Message) {
 	events, err := b.db.GetLastEvents(ctx, 10)
 	if err != nil {
+		b.logger.Error("Failed to get last events",
+			zap.Error(err),
+			zap.Int64("user_id", message.From.ID),
+		)
 		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
 		b.sendMessage(msg)
 		return
 	}
 
 	if len(events) == 0 {
+		b.logger.Info("No reading events found", zap.Int64("user_id", message.From.ID))
 		msg := tgbotapi.NewMessage(message.Chat.ID, "No reading events recorded yet.")
 		b.sendMessage(msg)
 		return
 	}
+
+	b.logger.Info("Retrieved last events",
+		zap.Int("event_count", len(events)),
+		zap.Int64("user_id", message.From.ID),
+	)
 
 	var text strings.Builder
 	text.WriteString("Last reading events:\n\n")

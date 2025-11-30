@@ -21,6 +21,7 @@ type Storage interface {
 	GetLastEvents(ctx context.Context, limit int) ([]models.Event, error)
 
 	// Statistics operations
+
 	// GetTopBooks returns top N books by read count within the specified time period
 	// If participantName is empty, returns statistics for all children (IsParent=false)
 	// If participantName is provided, returns statistics only for that participant

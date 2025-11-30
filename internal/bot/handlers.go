@@ -2,10 +2,10 @@ package bot
 
 import (
 	"context"
-	"log"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 // handleMessage processes a single message
@@ -13,7 +13,12 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 	// Recover from panics to prevent bot crashes
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic in handleMessage: %v", r)
+			b.logger.Error("Recovered from panic in handleMessage",
+				zap.Any("panic", r),
+				zap.Int64("user_id", message.From.ID),
+				zap.Int64("chat_id", message.Chat.ID),
+				zap.String("text", message.Text),
+			)
 			msg := tgbotapi.NewMessage(message.Chat.ID, "An error occurred while processing your request. Please try again.")
 			b.sendMessage(msg)
 		}
@@ -21,6 +26,13 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 
 	userID := message.From.ID
 	ctx := context.Background()
+
+	b.logger.Debug("Received message",
+		zap.Int64("user_id", userID),
+		zap.Int64("chat_id", message.Chat.ID),
+		zap.String("text", message.Text),
+		zap.Bool("is_command", message.IsCommand()),
+	)
 
 	// Check if user is in a conversation
 	if state, ok := b.states[userID]; ok {
@@ -40,7 +52,14 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 
 	// Handle commands
 	if message.IsCommand() {
-		switch message.Command() {
+		cmd := message.Command()
+		b.logger.Info("Processing command",
+			zap.String("command", cmd),
+			zap.Int64("user_id", userID),
+			zap.Int64("chat_id", message.Chat.ID),
+		)
+
+		switch cmd {
 		case "start":
 			b.handleStart(message)
 		case "new_book":
@@ -54,6 +73,10 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 		case "stats":
 			b.handleStatsStart(ctx, message)
 		default:
+			b.logger.Warn("Unknown command",
+				zap.String("command", cmd),
+				zap.Int64("user_id", userID),
+			)
 			msg := tgbotapi.NewMessage(message.Chat.ID, "Unknown command. Use /start to see available commands.")
 			b.sendMessage(msg)
 		}
@@ -65,12 +88,21 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 	// Recover from panics
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic in handleCallbackQuery: %v", r)
+			b.logger.Error("Recovered from panic in handleCallbackQuery",
+				zap.Any("panic", r),
+				zap.Int64("user_id", query.From.ID),
+				zap.String("callback_data", query.Data),
+			)
 		}
 	}()
 
 	userID := query.From.ID
 	ctx := context.Background()
+
+	b.logger.Debug("Received callback query",
+		zap.Int64("user_id", userID),
+		zap.String("callback_data", query.Data),
+	)
 
 	// Answer the callback query to remove loading state
 	callback := tgbotapi.NewCallback(query.ID, "")
@@ -81,6 +113,10 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 	// Check if user is in a conversation
 	state, ok := b.states[userID]
 	if !ok {
+		b.logger.Debug("No conversation state for callback",
+			zap.Int64("user_id", userID),
+			zap.String("callback_data", query.Data),
+		)
 		return
 	}
 
@@ -96,10 +132,16 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 		b.handleStatsPeriodCallback(ctx, query, state)
 	} else if strings.HasPrefix(data, "stats_participant:") {
 		b.handleStatsParticipantCallback(ctx, query, state)
+	} else {
+		b.logger.Warn("Unknown callback prefix",
+			zap.String("callback_data", data),
+			zap.Int64("user_id", userID),
+		)
 	}
 
 	// Clean up completed conversations
 	if state.Step == -1 {
 		delete(b.states, userID)
+		b.logger.Debug("Conversation completed", zap.Int64("user_id", userID))
 	}
 }

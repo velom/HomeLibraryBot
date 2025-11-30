@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 // Note: We can't easily mock tgbotapi.BotAPI, so tests focus on internal logic
@@ -25,6 +26,7 @@ func TestBot_NewBookConversation(t *testing.T) {
 		db:           db,
 		allowedUsers: map[int64]bool{123: true},
 		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(), // Use nop logger for tests
 	}
 
 	// Create a mock message
@@ -104,6 +106,7 @@ func TestBot_ReadConversation(t *testing.T) {
 		db:           db,
 		allowedUsers: map[int64]bool{123: true},
 		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(), // Use nop logger for tests
 	}
 
 	userID := int64(123)
@@ -162,6 +165,7 @@ func TestBot_InvalidBookSelection(t *testing.T) {
 		db:           db,
 		allowedUsers: map[int64]bool{123: true},
 		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(), // Use nop logger for tests
 	}
 
 	userID := int64(123)
@@ -204,6 +208,7 @@ func TestBot_PanicRecovery(t *testing.T) {
 		db:           db,
 		allowedUsers: map[int64]bool{123: true},
 		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(), // Use nop logger for tests
 	}
 
 	userID := int64(123)
@@ -250,6 +255,7 @@ func TestBot_CommandAfterCallbackCompletion(t *testing.T) {
 		db:           db,
 		allowedUsers: map[int64]bool{123: true},
 		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(), // Use nop logger for tests
 	}
 
 	userID := int64(123)
@@ -295,6 +301,7 @@ func TestBot_CommandInterruptsConversation(t *testing.T) {
 		db:           db,
 		allowedUsers: map[int64]bool{123: true},
 		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(), // Use nop logger for tests
 	}
 
 	userID := int64(123)

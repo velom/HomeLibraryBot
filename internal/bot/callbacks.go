@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 )
 
 // handleDateCallback processes date selection from inline keyboard
@@ -42,6 +43,10 @@ func (b *Bot) handleDateCallback(ctx context.Context, query *tgbotapi.CallbackQu
 	// Get books and show selection
 	books, err := b.db.ListReadableBooks(ctx)
 	if err != nil {
+		b.logger.Error("Failed to list readable books in date callback",
+			zap.Error(err),
+			zap.Int64("user_id", query.From.ID),
+		)
 		msg := tgbotapi.NewMessage(query.Message.Chat.ID, fmt.Sprintf("Error: %v", err))
 		b.sendMessage(msg)
 		state.Step = -1
@@ -252,16 +257,35 @@ func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, star
 	// Get top 10 books
 	stats, err := b.db.GetTopBooks(ctx, 10, startDate, endDate, participantName)
 	if err != nil {
+		b.logger.Error("Failed to get top books for stats report",
+			zap.Error(err),
+			zap.Int64("chat_id", chatID),
+			zap.String("participant", participantName),
+			zap.Time("start_date", startDate),
+			zap.Time("end_date", endDate),
+		)
 		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Error: %v", err))
 		b.sendMessage(msg)
 		return
 	}
 
 	if len(stats) == 0 {
+		b.logger.Info("No reading events found for stats period",
+			zap.Int64("chat_id", chatID),
+			zap.String("participant", participantName),
+			zap.Time("start_date", startDate),
+			zap.Time("end_date", endDate),
+		)
 		msg := tgbotapi.NewMessage(chatID, "No reading events found for the selected period.")
 		b.sendMessage(msg)
 		return
 	}
+
+	b.logger.Info("Generated stats report",
+		zap.Int("book_count", len(stats)),
+		zap.Int64("chat_id", chatID),
+		zap.String("participant", participantName),
+	)
 
 	// Format the report
 	var text strings.Builder

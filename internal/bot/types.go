@@ -2,6 +2,7 @@ package bot
 
 import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 	"library/internal/storage"
 )
 
@@ -11,6 +12,7 @@ type Bot struct {
 	db           storage.Storage
 	allowedUsers map[int64]bool
 	states       map[int64]*ConversationState
+	logger       *zap.Logger
 }
 
 // ConversationState tracks the state of multi-step commands

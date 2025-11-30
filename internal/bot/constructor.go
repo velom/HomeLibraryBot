@@ -4,13 +4,15 @@ import (
 	"fmt"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"go.uber.org/zap"
 	"library/internal/storage"
 )
 
 // NewBot creates a new Telegram bot
-func NewBot(token string, db storage.Storage, allowedUserIDs []int64) (*Bot, error) {
+func NewBot(token string, db storage.Storage, allowedUserIDs []int64, logger *zap.Logger) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
+		logger.Error("Failed to create bot API", zap.Error(err))
 		return nil, fmt.Errorf("failed to create bot: %w", err)
 	}
 
@@ -19,11 +21,14 @@ func NewBot(token string, db storage.Storage, allowedUserIDs []int64) (*Bot, err
 		allowedUsers[id] = true
 	}
 
+	logger.Info("Bot created", zap.String("bot_username", api.Self.UserName))
+
 	return &Bot{
 		api:          api,
 		db:           db,
 		allowedUsers: allowedUsers,
 		states:       make(map[int64]*ConversationState),
+		logger:       logger,
 	}, nil
 }
 
