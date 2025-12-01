@@ -28,13 +28,13 @@ Available commands:
 func (b *Bot) handleNewBookStart(message *tgbotapi.Message) {
 	userID := message.From.ID
 	b.states[userID] = &ConversationState{
-		Command: "new_book",
-		Step:    1,
-		Data:    make(map[string]interface{}),
+		Command:           "new_book",
+		Step:              1,
+		Data:              make(map[string]interface{}),
+		OriginalMessageID: message.MessageID,
 	}
 
-	msg := tgbotapi.NewMessage(message.Chat.ID, "Please enter the book name:")
-	b.sendMessage(msg)
+	b.sendReply(message.Chat.ID, "Please enter the book name:", message.MessageID)
 }
 
 // handleReadStart initiates the read event conversation
@@ -61,15 +61,13 @@ func (b *Bot) handleReadStart(ctx context.Context, message *tgbotapi.Message) {
 	}
 
 	b.states[userID] = &ConversationState{
-		Command: "read",
-		Step:    1,
-		Data:    make(map[string]interface{}),
+		Command:           "read",
+		Step:              1,
+		Data:              make(map[string]interface{}),
+		OriginalMessageID: message.MessageID,
 	}
 
 	// Show date selection with inline keyboard
-	msg := tgbotapi.NewMessage(message.Chat.ID, "📅 Select reading date:")
-
-	// Create inline keyboard with date options
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📆 Today", "date:today"),
@@ -83,8 +81,7 @@ func (b *Bot) handleReadStart(ctx context.Context, message *tgbotapi.Message) {
 			tgbotapi.NewInlineKeyboardButtonData("📝 Custom date", "date:custom"),
 		),
 	)
-	msg.ReplyMarkup = keyboard
-	b.sendMessage(msg)
+	b.sendReplyWithMarkup(message.Chat.ID, "📅 Select reading date:", message.MessageID, keyboard)
 }
 
 // handleWhoIsNext shows who should read next based on rotation logic
@@ -183,14 +180,13 @@ func (b *Bot) handleLast(ctx context.Context, message *tgbotapi.Message) {
 func (b *Bot) handleStatsStart(ctx context.Context, message *tgbotapi.Message) {
 	userID := message.From.ID
 	b.states[userID] = &ConversationState{
-		Command: "stats",
-		Step:    1,
-		Data:    make(map[string]interface{}),
+		Command:           "stats",
+		Step:              1,
+		Data:              make(map[string]interface{}),
+		OriginalMessageID: message.MessageID,
 	}
 
 	// Show time period selection
-	msg := tgbotapi.NewMessage(message.Chat.ID, "📊 Select time period for statistics:")
-
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📅 Specific month", "stats_period:month"),
@@ -205,6 +201,5 @@ func (b *Bot) handleStatsStart(ctx context.Context, message *tgbotapi.Message) {
 			tgbotapi.NewInlineKeyboardButtonData("⏮ Last 12 months", "stats_period:last12"),
 		),
 	)
-	msg.ReplyMarkup = keyboard
-	b.sendMessage(msg)
+	b.sendReplyWithMarkup(message.Chat.ID, "📊 Select time period for statistics:", message.MessageID, keyboard)
 }
