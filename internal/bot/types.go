@@ -17,7 +17,8 @@ type Bot struct {
 
 // ConversationState tracks the state of multi-step commands
 type ConversationState struct {
-	Command string
-	Step    int
-	Data    map[string]interface{}
+	Command           string
+	Step              int
+	Data              map[string]interface{}
+	OriginalMessageID int // ID of the message that started this conversation, used for threading
 }
