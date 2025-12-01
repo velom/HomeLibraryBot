@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/matterbridge/telegram-bot-api/v6"
 	"go.uber.org/zap"
 )
 
@@ -19,8 +19,7 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 				zap.Int64("chat_id", message.Chat.ID),
 				zap.String("text", message.Text),
 			)
-			msg := tgbotapi.NewMessage(message.Chat.ID, "An error occurred while processing your request. Please try again.")
-			b.sendMessage(msg)
+			b.sendMessageInThread(message.Chat.ID, "An error occurred while processing your request. Please try again.", message.MessageThreadID)
 		}
 	}()
 
@@ -77,8 +76,7 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 				zap.String("command", cmd),
 				zap.Int64("user_id", userID),
 			)
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Unknown command. Use /start to see available commands.")
-			b.sendMessage(msg)
+			b.sendMessageInThread(message.Chat.ID, "Unknown command. Use /start to see available commands.", message.MessageThreadID)
 		}
 	}
 }

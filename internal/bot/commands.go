@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/matterbridge/telegram-bot-api/v6"
 	"go.uber.org/zap"
 )
 
@@ -20,21 +20,20 @@ Available commands:
 /last - Show last 10 reading events
 /stats - View reading statistics`
 
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	b.sendMessage(msg)
+	b.sendMessageInThread(message.Chat.ID, text, message.MessageThreadID)
 }
 
 // handleNewBookStart initiates the new book conversation
 func (b *Bot) handleNewBookStart(message *tgbotapi.Message) {
 	userID := message.From.ID
 	b.states[userID] = &ConversationState{
-		Command:           "new_book",
-		Step:              1,
-		Data:              make(map[string]interface{}),
-		OriginalMessageID: message.MessageID,
+		Command:         "new_book",
+		Step:            1,
+		Data:            make(map[string]interface{}),
+		MessageThreadID: message.MessageThreadID,
 	}
 
-	b.sendReply(message.Chat.ID, "Please enter the book name:", message.MessageID)
+	b.sendMessageInThread(message.Chat.ID, "Please enter the book name:", message.MessageThreadID)
 }
 
 // handleReadStart initiates the read event conversation
@@ -48,23 +47,21 @@ func (b *Bot) handleReadStart(ctx context.Context, message *tgbotapi.Message) {
 			zap.Error(err),
 			zap.Int64("user_id", userID),
 		)
-		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
 		return
 	}
 
 	if len(books) == 0 {
 		b.logger.Info("No readable books available", zap.Int64("user_id", userID))
-		msg := tgbotapi.NewMessage(message.Chat.ID, "No readable books available. Please add books first with /new_book")
-		b.sendMessage(msg)
+		b.sendMessageInThread(message.Chat.ID, "No readable books available. Please add books first with /new_book", message.MessageThreadID)
 		return
 	}
 
 	b.states[userID] = &ConversationState{
-		Command:           "read",
-		Step:              1,
-		Data:              make(map[string]interface{}),
-		OriginalMessageID: message.MessageID,
+		Command:         "read",
+		Step:            1,
+		Data:            make(map[string]interface{}),
+		MessageThreadID: message.MessageThreadID,
 	}
 
 	// Show date selection with inline keyboard
@@ -81,7 +78,7 @@ func (b *Bot) handleReadStart(ctx context.Context, message *tgbotapi.Message) {
 			tgbotapi.NewInlineKeyboardButtonData("📝 Custom date", "date:custom"),
 		),
 	)
-	b.sendReplyWithMarkup(message.Chat.ID, "📅 Select reading date:", message.MessageID, keyboard)
+	b.sendMessageInThreadWithMarkup(message.Chat.ID, "📅 Select reading date:", message.MessageThreadID, keyboard)
 }
 
 // handleWhoIsNext shows who should read next based on rotation logic
@@ -93,15 +90,13 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *tgbotapi.Message) {
 			zap.Error(err),
 			zap.Int64("user_id", message.From.ID),
 		)
-		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
 		return
 	}
 
 	if len(participants) == 0 {
 		b.logger.Warn("No participants found", zap.Int64("user_id", message.From.ID))
-		msg := tgbotapi.NewMessage(message.Chat.ID, "No participants found in database")
-		b.sendMessage(msg)
+		b.sendMessageInThread(message.Chat.ID, "No participants found in database", message.MessageThreadID)
 		return
 	}
 
@@ -112,8 +107,7 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *tgbotapi.Message) {
 			zap.Error(err),
 			zap.Int64("user_id", message.From.ID),
 		)
-		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
 		return
 	}
 
@@ -127,14 +121,12 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *tgbotapi.Message) {
 	nextReader := ComputeNextParticipant(participants, lastParticipant)
 
 	if nextReader == "" {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "No child participants found in database")
-		b.sendMessage(msg)
+		b.sendMessageInThread(message.Chat.ID, "No child participants found in database", message.MessageThreadID)
 		return
 	}
 
 	text := fmt.Sprintf("Next to read: %s", nextReader)
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	b.sendMessage(msg)
+	b.sendMessageInThread(message.Chat.ID, text, message.MessageThreadID)
 }
 
 // handleLast shows the last 10 reading events
@@ -145,15 +137,13 @@ func (b *Bot) handleLast(ctx context.Context, message *tgbotapi.Message) {
 			zap.Error(err),
 			zap.Int64("user_id", message.From.ID),
 		)
-		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
 		return
 	}
 
 	if len(events) == 0 {
 		b.logger.Info("No reading events found", zap.Int64("user_id", message.From.ID))
-		msg := tgbotapi.NewMessage(message.Chat.ID, "No reading events recorded yet.")
-		b.sendMessage(msg)
+		b.sendMessageInThread(message.Chat.ID, "No reading events recorded yet.", message.MessageThreadID)
 		return
 	}
 
@@ -172,18 +162,17 @@ func (b *Bot) handleLast(ctx context.Context, message *tgbotapi.Message) {
 			event.ParticipantName))
 	}
 
-	msg := tgbotapi.NewMessage(message.Chat.ID, text.String())
-	b.sendMessage(msg)
+	b.sendMessageInThread(message.Chat.ID, text.String(), message.MessageThreadID)
 }
 
 // handleStatsStart initiates the statistics conversation
 func (b *Bot) handleStatsStart(ctx context.Context, message *tgbotapi.Message) {
 	userID := message.From.ID
 	b.states[userID] = &ConversationState{
-		Command:           "stats",
-		Step:              1,
-		Data:              make(map[string]interface{}),
-		OriginalMessageID: message.MessageID,
+		Command:         "stats",
+		Step:            1,
+		Data:            make(map[string]interface{}),
+		MessageThreadID: message.MessageThreadID,
 	}
 
 	// Show time period selection
@@ -201,5 +190,5 @@ func (b *Bot) handleStatsStart(ctx context.Context, message *tgbotapi.Message) {
 			tgbotapi.NewInlineKeyboardButtonData("⏮ Last 12 months", "stats_period:last12"),
 		),
 	)
-	b.sendReplyWithMarkup(message.Chat.ID, "📊 Select time period for statistics:", message.MessageID, keyboard)
+	b.sendMessageInThreadWithMarkup(message.Chat.ID, "📊 Select time period for statistics:", message.MessageThreadID, keyboard)
 }

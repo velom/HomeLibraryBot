@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/matterbridge/telegram-bot-api/v6"
 	"go.uber.org/zap"
 )
 
@@ -18,8 +18,7 @@ func (b *Bot) handleDateCallback(ctx context.Context, query *tgbotapi.CallbackQu
 	// Handle custom date option
 	if data == "custom" {
 		state.Data["awaiting_custom_date"] = true
-		msg := tgbotapi.NewMessage(query.Message.Chat.ID, "📝 Please enter the date in format YYYY-MM-DD\n\nExample: 2024-01-15")
-		b.sendMessage(msg)
+		b.sendMessageInThread(query.Message.Chat.ID, "📝 Please enter the date in format YYYY-MM-DD\n\nExample: 2024-01-15", state.MessageThreadID)
 		return
 	}
 
@@ -47,15 +46,12 @@ func (b *Bot) handleDateCallback(ctx context.Context, query *tgbotapi.CallbackQu
 			zap.Error(err),
 			zap.Int64("user_id", query.From.ID),
 		)
-		msg := tgbotapi.NewMessage(query.Message.Chat.ID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(query.Message.Chat.ID, fmt.Sprintf("Error: %v", err), state.MessageThreadID)
 		state.Step = -1
 		return
 	}
 
 	// Create inline keyboard for book selection (2 columns)
-	msg := tgbotapi.NewMessage(query.Message.Chat.ID, "📚 Select a book:")
-
 	var rows [][]tgbotapi.InlineKeyboardButton
 	var currentRow []tgbotapi.InlineKeyboardButton
 	for i, book := range books {
@@ -73,8 +69,7 @@ func (b *Bot) handleDateCallback(ctx context.Context, query *tgbotapi.CallbackQu
 	}
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
-	msg.ReplyMarkup = keyboard
-	b.sendMessage(msg)
+	b.sendMessageInThreadWithMarkup(query.Message.Chat.ID, "📚 Select a book:", state.MessageThreadID, keyboard)
 }
 
 // handleBookCallback processes book selection from inline keyboard
@@ -88,8 +83,7 @@ func (b *Bot) handleBookCallback(ctx context.Context, query *tgbotapi.CallbackQu
 	// Get books to validate selection
 	books, err := b.db.ListReadableBooks(ctx)
 	if err != nil || bookIdx < 0 || bookIdx >= len(books) {
-		msg := tgbotapi.NewMessage(query.Message.Chat.ID, "Error: Invalid book selection")
-		b.sendMessage(msg)
+		b.sendMessageInThread(query.Message.Chat.ID, "Error: Invalid book selection", state.MessageThreadID)
 		state.Step = -1
 		return
 	}
@@ -101,15 +95,12 @@ func (b *Bot) handleBookCallback(ctx context.Context, query *tgbotapi.CallbackQu
 	// Get participants and show selection
 	participants, err := b.db.ListParticipants(ctx)
 	if err != nil {
-		msg := tgbotapi.NewMessage(query.Message.Chat.ID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(query.Message.Chat.ID, fmt.Sprintf("Error: %v", err), state.MessageThreadID)
 		state.Step = -1
 		return
 	}
 
 	// Create inline keyboard for participant selection
-	msg := tgbotapi.NewMessage(query.Message.Chat.ID, "👤 Select a participant:")
-
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, p := range participants {
 		emoji := "👶"
@@ -124,8 +115,7 @@ func (b *Bot) handleBookCallback(ctx context.Context, query *tgbotapi.CallbackQu
 	}
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
-	msg.ReplyMarkup = keyboard
-	b.sendMessage(msg)
+	b.sendMessageInThreadWithMarkup(query.Message.Chat.ID, "👤 Select a participant:", state.MessageThreadID, keyboard)
 }
 
 // handleParticipantCallback processes participant selection from inline keyboard
@@ -138,13 +128,11 @@ func (b *Bot) handleParticipantCallback(ctx context.Context, query *tgbotapi.Cal
 	// Create the event
 	err := b.db.CreateEvent(ctx, date, bookName, participantName)
 	if err != nil {
-		msg := tgbotapi.NewMessage(query.Message.Chat.ID, fmt.Sprintf("Error creating event: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(query.Message.Chat.ID, fmt.Sprintf("Error creating event: %v", err), state.MessageThreadID)
 	} else {
 		text := fmt.Sprintf("✅ Reading event recorded!\n\n📅 Date: %s\n📚 Book: %s\n👤 Reader: %s",
 			date.Format("2006-01-02"), bookName, participantName)
-		msg := tgbotapi.NewMessage(query.Message.Chat.ID, text)
-		b.sendMessage(msg)
+		b.sendMessageInThread(query.Message.Chat.ID, text, state.MessageThreadID)
 	}
 
 	state.Step = -1 // Mark conversation as complete
@@ -161,14 +149,12 @@ func (b *Bot) handleStatsPeriodCallback(ctx context.Context, query *tgbotapi.Cal
 	case "month":
 		// Show month selection menu
 		state.Data["awaiting_month"] = true
-		msg := tgbotapi.NewMessage(query.Message.Chat.ID, "📝 Please enter the month in format YYYY-MM\n\nExample: 2024-11")
-		b.sendMessage(msg)
+		b.sendMessageInThread(query.Message.Chat.ID, "📝 Please enter the month in format YYYY-MM\n\nExample: 2024-11", state.MessageThreadID)
 		return
 	case "year":
 		// Show year selection menu
 		state.Data["awaiting_year"] = true
-		msg := tgbotapi.NewMessage(query.Message.Chat.ID, "📝 Please enter the year\n\nExample: 2024")
-		b.sendMessage(msg)
+		b.sendMessageInThread(query.Message.Chat.ID, "📝 Please enter the year\n\nExample: 2024", state.MessageThreadID)
 		return
 	case "last2":
 		startDate = now.AddDate(0, -2, 0)
@@ -195,7 +181,7 @@ func (b *Bot) handleStatsPeriodCallback(ctx context.Context, query *tgbotapi.Cal
 	state.Step = 2
 
 	// Show participant selection
-	b.showParticipantSelectionForStats(ctx, query.Message.Chat.ID)
+	b.showParticipantSelectionForStats(ctx, query.Message.Chat.ID, state.MessageThreadID)
 }
 
 // handleStatsParticipantCallback processes participant selection for statistics
@@ -207,17 +193,16 @@ func (b *Bot) handleStatsParticipantCallback(ctx context.Context, query *tgbotap
 	periodLabel := state.Data["period_label"].(string)
 
 	// Generate and send the report
-	b.generateAndSendStatsReport(ctx, query.Message.Chat.ID, startDate, endDate, periodLabel, participantName)
+	b.generateAndSendStatsReport(ctx, query.Message.Chat.ID, startDate, endDate, periodLabel, participantName, state.MessageThreadID)
 
 	state.Step = -1 // Mark conversation as complete
 }
 
 // showParticipantSelectionForStats shows the participant selection menu for statistics
-func (b *Bot) showParticipantSelectionForStats(ctx context.Context, chatID int64) {
+func (b *Bot) showParticipantSelectionForStats(ctx context.Context, chatID int64, messageThreadID int) {
 	participants, err := b.db.ListParticipants(ctx)
 	if err != nil {
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(chatID, fmt.Sprintf("Error: %v", err), messageThreadID)
 		return
 	}
 
@@ -228,8 +213,6 @@ func (b *Bot) showParticipantSelectionForStats(ctx context.Context, chatID int64
 			children = append(children, p.Name)
 		}
 	}
-
-	msg := tgbotapi.NewMessage(chatID, "👥 Select participant:")
 
 	var rows [][]tgbotapi.InlineKeyboardButton
 
@@ -248,12 +231,11 @@ func (b *Bot) showParticipantSelectionForStats(ctx context.Context, chatID int64
 	}
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
-	msg.ReplyMarkup = keyboard
-	b.sendMessage(msg)
+	b.sendMessageInThreadWithMarkup(chatID, "👥 Select participant:", messageThreadID, keyboard)
 }
 
 // generateAndSendStatsReport generates and sends the statistics report
-func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, startDate, endDate time.Time, periodLabel, participantName string) {
+func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, startDate, endDate time.Time, periodLabel, participantName string, messageThreadID int) {
 	// Get top 10 books
 	stats, err := b.db.GetTopBooks(ctx, 10, startDate, endDate, participantName)
 	if err != nil {
@@ -264,8 +246,7 @@ func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, star
 			zap.Time("start_date", startDate),
 			zap.Time("end_date", endDate),
 		)
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(chatID, fmt.Sprintf("Error: %v", err), messageThreadID)
 		return
 	}
 
@@ -276,8 +257,7 @@ func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, star
 			zap.Time("start_date", startDate),
 			zap.Time("end_date", endDate),
 		)
-		msg := tgbotapi.NewMessage(chatID, "No reading events found for the selected period.")
-		b.sendMessage(msg)
+		b.sendMessageInThread(chatID, "No reading events found for the selected period.", messageThreadID)
 		return
 	}
 
@@ -304,6 +284,5 @@ func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, star
 		text.WriteString(fmt.Sprintf("%d. %s - %d reads\n", i+1, stat.BookName, stat.ReadCount))
 	}
 
-	msg := tgbotapi.NewMessage(chatID, text.String())
-	b.sendMessage(msg)
+	b.sendMessageInThread(chatID, text.String(), messageThreadID)
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/matterbridge/telegram-bot-api/v6"
 )
 
 // handleConversation processes multi-step conversations
@@ -37,10 +37,10 @@ func (b *Bot) handleNewBookConversation(ctx context.Context, message *tgbotapi.M
 
 		id, err := b.db.CreateBook(ctx, name)
 		if err != nil {
-			b.sendReply(message.Chat.ID, fmt.Sprintf("Error creating book: %v", err), state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, fmt.Sprintf("Error creating book: %v", err), state.MessageThreadID)
 		} else {
 			text := fmt.Sprintf("Book created successfully!\nName: %s", id)
-			b.sendReply(message.Chat.ID, text, state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, text, state.MessageThreadID)
 		}
 
 		state.Step = -1 // Mark conversation as complete
@@ -65,7 +65,7 @@ func (b *Bot) handleReadConversation(ctx context.Context, message *tgbotapi.Mess
 		} else {
 			date, err = time.Parse("2006-01-02", message.Text)
 			if err != nil {
-				b.sendReply(message.Chat.ID, "❌ Invalid date format. Please use YYYY-MM-DD\n\nExample: 2024-01-15", state.OriginalMessageID)
+				b.sendMessageInThread(message.Chat.ID, "❌ Invalid date format. Please use YYYY-MM-DD\n\nExample: 2024-01-15", state.MessageThreadID)
 				return
 			}
 		}
@@ -78,7 +78,7 @@ func (b *Bot) handleReadConversation(ctx context.Context, message *tgbotapi.Mess
 		// Show book selection with inline keyboard
 		books, err := b.db.ListReadableBooks(ctx)
 		if err != nil {
-			b.sendReply(message.Chat.ID, fmt.Sprintf("Error: %v", err), state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, fmt.Sprintf("Error: %v", err), state.MessageThreadID)
 			state.Step = -1
 			return
 		}
@@ -101,25 +101,25 @@ func (b *Bot) handleReadConversation(ctx context.Context, message *tgbotapi.Mess
 		}
 
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
-		b.sendReplyWithMarkup(message.Chat.ID, "📚 Select a book:", state.OriginalMessageID, keyboard)
+		b.sendMessageInThreadWithMarkup(message.Chat.ID, "📚 Select a book:", state.MessageThreadID, keyboard)
 
 	case 2: // Waiting for book selection
 		bookIdx, err := strconv.Atoi(message.Text)
 		if err != nil {
-			b.sendReply(message.Chat.ID, "Invalid selection. Please enter a valid number:", state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, "Invalid selection. Please enter a valid number:", state.MessageThreadID)
 			return
 		}
 
 		// Get books list to validate selection
 		bookList, err := b.db.ListReadableBooks(ctx)
 		if err != nil {
-			b.sendReply(message.Chat.ID, fmt.Sprintf("Error: %v", err), state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, fmt.Sprintf("Error: %v", err), state.MessageThreadID)
 			state.Step = -1
 			return
 		}
 
 		if bookIdx < 1 || bookIdx > len(bookList) {
-			b.sendReply(message.Chat.ID, "Invalid selection. Please enter a valid number:", state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, "Invalid selection. Please enter a valid number:", state.MessageThreadID)
 			return
 		}
 
@@ -130,7 +130,7 @@ func (b *Bot) handleReadConversation(ctx context.Context, message *tgbotapi.Mess
 		// Show participant selection
 		participants, err := b.db.ListParticipants(ctx)
 		if err != nil {
-			b.sendReply(message.Chat.ID, fmt.Sprintf("Error: %v", err), state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, fmt.Sprintf("Error: %v", err), state.MessageThreadID)
 			state.Step = -1
 			return
 		}
@@ -141,25 +141,25 @@ func (b *Bot) handleReadConversation(ctx context.Context, message *tgbotapi.Mess
 			text.WriteString(fmt.Sprintf("%d. %s\n", i+1, p.Name))
 		}
 
-		b.sendReply(message.Chat.ID, text.String(), state.OriginalMessageID)
+		b.sendMessageInThread(message.Chat.ID, text.String(), state.MessageThreadID)
 
 	case 3: // Waiting for participant selection
 		participantIdx, err := strconv.Atoi(message.Text)
 		if err != nil {
-			b.sendReply(message.Chat.ID, "Invalid selection. Please enter a valid number:", state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, "Invalid selection. Please enter a valid number:", state.MessageThreadID)
 			return
 		}
 
 		// Get participants list to validate selection
 		participantList, err := b.db.ListParticipants(ctx)
 		if err != nil {
-			b.sendReply(message.Chat.ID, fmt.Sprintf("Error: %v", err), state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, fmt.Sprintf("Error: %v", err), state.MessageThreadID)
 			state.Step = -1
 			return
 		}
 
 		if participantIdx < 1 || participantIdx > len(participantList) {
-			b.sendReply(message.Chat.ID, "Invalid selection. Please enter a valid number:", state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, "Invalid selection. Please enter a valid number:", state.MessageThreadID)
 			return
 		}
 
@@ -170,11 +170,11 @@ func (b *Bot) handleReadConversation(ctx context.Context, message *tgbotapi.Mess
 		// Create the event
 		err = b.db.CreateEvent(ctx, date, bookName, selectedParticipant.Name)
 		if err != nil {
-			b.sendReply(message.Chat.ID, fmt.Sprintf("Error creating event: %v", err), state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, fmt.Sprintf("Error creating event: %v", err), state.MessageThreadID)
 		} else {
 			text := fmt.Sprintf("Reading event recorded!\n\nDate: %s\nBook: %s\nReader: %s",
 				date.Format("2006-01-02"), bookName, selectedParticipant.Name)
-			b.sendReply(message.Chat.ID, text, state.OriginalMessageID)
+			b.sendMessageInThread(message.Chat.ID, text, state.MessageThreadID)
 		}
 
 		state.Step = -1 // Mark conversation as complete
@@ -190,7 +190,7 @@ func (b *Bot) handleStatsConversation(ctx context.Context, message *tgbotapi.Mes
 			// Parse month in YYYY-MM format
 			date, err := time.Parse("2006-01", message.Text)
 			if err != nil {
-				b.sendReply(message.Chat.ID, "❌ Invalid month format. Please use YYYY-MM\n\nExample: 2024-11", state.OriginalMessageID)
+				b.sendMessageInThread(message.Chat.ID, "❌ Invalid month format. Please use YYYY-MM\n\nExample: 2024-11", state.MessageThreadID)
 				return
 			}
 
@@ -205,7 +205,7 @@ func (b *Bot) handleStatsConversation(ctx context.Context, message *tgbotapi.Mes
 			state.Step = 2
 
 			// Show participant selection
-			b.showParticipantSelectionForStats(ctx, message.Chat.ID)
+			b.showParticipantSelectionForStats(ctx, message.Chat.ID, state.MessageThreadID)
 			return
 		}
 
@@ -214,7 +214,7 @@ func (b *Bot) handleStatsConversation(ctx context.Context, message *tgbotapi.Mes
 			// Parse year
 			year, err := strconv.Atoi(message.Text)
 			if err != nil || year < 1900 || year > 2100 {
-				b.sendReply(message.Chat.ID, "❌ Invalid year. Please enter a valid year\n\nExample: 2024", state.OriginalMessageID)
+				b.sendMessageInThread(message.Chat.ID, "❌ Invalid year. Please enter a valid year\n\nExample: 2024", state.MessageThreadID)
 				return
 			}
 
@@ -229,7 +229,7 @@ func (b *Bot) handleStatsConversation(ctx context.Context, message *tgbotapi.Mes
 			state.Step = 2
 
 			// Show participant selection
-			b.showParticipantSelectionForStats(ctx, message.Chat.ID)
+			b.showParticipantSelectionForStats(ctx, message.Chat.ID, state.MessageThreadID)
 			return
 		}
 	}

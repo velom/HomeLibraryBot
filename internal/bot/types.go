@@ -1,7 +1,7 @@
 package bot
 
 import (
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbotapi "github.com/matterbridge/telegram-bot-api/v6"
 	"go.uber.org/zap"
 	"library/internal/storage"
 )
@@ -17,8 +17,8 @@ type Bot struct {
 
 // ConversationState tracks the state of multi-step commands
 type ConversationState struct {
-	Command           string
-	Step              int
-	Data              map[string]interface{}
-	OriginalMessageID int // ID of the message that started this conversation, used for threading
+	Command         string
+	Step            int
+	Data            map[string]interface{}
+	MessageThreadID int // ID of the topic/thread in Telegram groups (forum mode)
 }
