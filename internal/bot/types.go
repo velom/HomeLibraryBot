@@ -1,17 +1,20 @@
 package bot
 
 import (
-	tgbotapi "github.com/matterbridge/telegram-bot-api/v6"
+	"sync"
+
+	"github.com/go-telegram/bot"
 	"go.uber.org/zap"
 	"library/internal/storage"
 )
 
-// Bot represents the Telegram bot
+// Bot represents the Telegram bot wrapper
 type Bot struct {
-	api          *tgbotapi.BotAPI
+	api          *bot.Bot
 	db           storage.Storage
 	allowedUsers map[int64]bool
 	states       map[int64]*ConversationState
+	statesMu     sync.RWMutex
 	logger       *zap.Logger
 }
 
