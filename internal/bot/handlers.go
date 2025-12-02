@@ -4,12 +4,13 @@ import (
 	"context"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	tgbot "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
 )
 
 // handleMessage processes a single message
-func (b *Bot) handleMessage(message *tgbotapi.Message) {
+func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 	// Recover from panics to prevent bot crashes
 	defer func() {
 		if r := recover(); r != nil {
@@ -19,29 +20,37 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 				zap.Int64("chat_id", message.Chat.ID),
 				zap.String("text", message.Text),
 			)
-			msg := tgbotapi.NewMessage(message.Chat.ID, "An error occurred while processing your request. Please try again.")
-			b.sendMessage(msg)
+			b.sendMessageInThread(ctx, message.Chat.ID, "An error occurred while processing your request. Please try again.", message.MessageThreadID)
 		}
 	}()
 
 	userID := message.From.ID
-	ctx := context.Background()
+
+	isCommand := len(message.Entities) > 0 && message.Entities[0].Type == models.MessageEntityTypeBotCommand && message.Entities[0].Offset == 0
 
 	b.logger.Debug("Received message",
 		zap.Int64("user_id", userID),
 		zap.Int64("chat_id", message.Chat.ID),
 		zap.String("text", message.Text),
-		zap.Bool("is_command", message.IsCommand()),
+		zap.Bool("is_command", isCommand),
 	)
 
 	// Check if user is in a conversation
-	if state, ok := b.states[userID]; ok {
+	b.statesMu.RLock()
+	state, hasState := b.states[userID]
+	b.statesMu.RUnlock()
+
+	if hasState {
 		// If conversation is already complete (Step == -1), clean it up and process as new command
 		if state.Step == -1 {
+			b.statesMu.Lock()
 			delete(b.states, userID)
-		} else if message.IsCommand() {
+			b.statesMu.Unlock()
+		} else if isCommand {
 			// Allow any command to interrupt/cancel an ongoing conversation
+			b.statesMu.Lock()
 			delete(b.states, userID)
+			b.statesMu.Unlock()
 			// Continue to process the new command below
 		} else {
 			// Not a command, continue the conversation
@@ -51,19 +60,32 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 	}
 
 	// Handle commands
-	if message.IsCommand() {
-		cmd := message.Command()
+	if isCommand {
+		// Extract command from text
+		cmdText := message.Text
+		if len(cmdText) > 0 && cmdText[0] == '/' {
+			cmdText = cmdText[1:] // Remove the leading '/'
+			// Remove bot username if present
+			if idx := strings.Index(cmdText, "@"); idx != -1 {
+				cmdText = cmdText[:idx]
+			}
+			// Remove arguments if present
+			if idx := strings.Index(cmdText, " "); idx != -1 {
+				cmdText = cmdText[:idx]
+			}
+		}
+
 		b.logger.Info("Processing command",
-			zap.String("command", cmd),
+			zap.String("command", cmdText),
 			zap.Int64("user_id", userID),
 			zap.Int64("chat_id", message.Chat.ID),
 		)
 
-		switch cmd {
+		switch cmdText {
 		case "start":
-			b.handleStart(message)
+			b.handleStart(ctx, message)
 		case "new_book":
-			b.handleNewBookStart(message)
+			b.handleNewBookStart(ctx, message)
 		case "read":
 			b.handleReadStart(ctx, message)
 		case "who_is_next":
@@ -74,17 +96,16 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) {
 			b.handleStatsStart(ctx, message)
 		default:
 			b.logger.Warn("Unknown command",
-				zap.String("command", cmd),
+				zap.String("command", cmdText),
 				zap.Int64("user_id", userID),
 			)
-			msg := tgbotapi.NewMessage(message.Chat.ID, "Unknown command. Use /start to see available commands.")
-			b.sendMessage(msg)
+			b.sendMessageInThread(ctx, message.Chat.ID, "Unknown command. Use /start to see available commands.", message.MessageThreadID)
 		}
 	}
 }
 
 // handleCallbackQuery processes inline keyboard button clicks
-func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
+func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQuery) {
 	// Recover from panics
 	defer func() {
 		if r := recover(); r != nil {
@@ -97,7 +118,6 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 	}()
 
 	userID := query.From.ID
-	ctx := context.Background()
 
 	b.logger.Debug("Received callback query",
 		zap.Int64("user_id", userID),
@@ -105,13 +125,15 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 	)
 
 	// Answer the callback query to remove loading state
-	callback := tgbotapi.NewCallback(query.ID, "")
-	if b.api != nil {
-		b.api.Request(callback)
-	}
+	b.api.AnswerCallbackQuery(ctx, &tgbot.AnswerCallbackQueryParams{
+		CallbackQueryID: query.ID,
+	})
 
 	// Check if user is in a conversation
+	b.statesMu.RLock()
 	state, ok := b.states[userID]
+	b.statesMu.RUnlock()
+
 	if !ok {
 		b.logger.Debug("No conversation state for callback",
 			zap.Int64("user_id", userID),
@@ -141,7 +163,9 @@ func (b *Bot) handleCallbackQuery(query *tgbotapi.CallbackQuery) {
 
 	// Clean up completed conversations
 	if state.Step == -1 {
+		b.statesMu.Lock()
 		delete(b.states, userID)
+		b.statesMu.Unlock()
 		b.logger.Debug("Conversation completed", zap.Int64("user_id", userID))
 	}
 }

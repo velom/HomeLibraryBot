@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
 )
 
 // handleStart shows welcome message and available commands
-func (b *Bot) handleStart(message *tgbotapi.Message) {
+func (b *Bot) handleStart(ctx context.Context, message *models.Message) {
 	text := `Welcome to the Home Library Bot! 📚
 
 Available commands:
@@ -20,25 +20,27 @@ Available commands:
 /last - Show last 10 reading events
 /stats - View reading statistics`
 
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	b.sendMessage(msg)
+	b.sendMessageInThread(ctx, message.Chat.ID, text, message.MessageThreadID)
 }
 
 // handleNewBookStart initiates the new book conversation
-func (b *Bot) handleNewBookStart(message *tgbotapi.Message) {
+func (b *Bot) handleNewBookStart(ctx context.Context, message *models.Message) {
 	userID := message.From.ID
-	b.states[userID] = &ConversationState{
-		Command:           "new_book",
-		Step:              1,
-		Data:              make(map[string]interface{}),
-		OriginalMessageID: message.MessageID,
-	}
 
-	b.sendReply(message.Chat.ID, "Please enter the book name:", message.MessageID)
+	b.statesMu.Lock()
+	b.states[userID] = &ConversationState{
+		Command:         "new_book",
+		Step:            1,
+		Data:            make(map[string]interface{}),
+		MessageThreadID: message.MessageThreadID,
+	}
+	b.statesMu.Unlock()
+
+	b.sendMessageInThread(ctx, message.Chat.ID, "Please enter the book name:", message.MessageThreadID)
 }
 
 // handleReadStart initiates the read event conversation
-func (b *Bot) handleReadStart(ctx context.Context, message *tgbotapi.Message) {
+func (b *Bot) handleReadStart(ctx context.Context, message *models.Message) {
 	userID := message.From.ID
 
 	// Get readable books
@@ -48,44 +50,46 @@ func (b *Bot) handleReadStart(ctx context.Context, message *tgbotapi.Message) {
 			zap.Error(err),
 			zap.Int64("user_id", userID),
 		)
-		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
 		return
 	}
 
 	if len(books) == 0 {
 		b.logger.Info("No readable books available", zap.Int64("user_id", userID))
-		msg := tgbotapi.NewMessage(message.Chat.ID, "No readable books available. Please add books first with /new_book")
-		b.sendMessage(msg)
+		b.sendMessageInThread(ctx, message.Chat.ID, "No readable books available. Please add books first with /new_book", message.MessageThreadID)
 		return
 	}
 
+	b.statesMu.Lock()
 	b.states[userID] = &ConversationState{
-		Command:           "read",
-		Step:              1,
-		Data:              make(map[string]interface{}),
-		OriginalMessageID: message.MessageID,
+		Command:         "read",
+		Step:            1,
+		Data:            make(map[string]interface{}),
+		MessageThreadID: message.MessageThreadID,
 	}
+	b.statesMu.Unlock()
 
 	// Show date selection with inline keyboard
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📆 Today", "date:today"),
-			tgbotapi.NewInlineKeyboardButtonData("⏮ Yesterday", "date:yesterday"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⏮⏮ 2 days ago", "date:2daysago"),
-			tgbotapi.NewInlineKeyboardButtonData("⏮⏮⏮ 3 days ago", "date:3daysago"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📝 Custom date", "date:custom"),
-		),
-	)
-	b.sendReplyWithMarkup(message.Chat.ID, "📅 Select reading date:", message.MessageID, keyboard)
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "📆 Today", CallbackData: "date:today"},
+				{Text: "⏮ Yesterday", CallbackData: "date:yesterday"},
+			},
+			{
+				{Text: "⏮⏮ 2 days ago", CallbackData: "date:2daysago"},
+				{Text: "⏮⏮⏮ 3 days ago", CallbackData: "date:3daysago"},
+			},
+			{
+				{Text: "📝 Custom date", CallbackData: "date:custom"},
+			},
+		},
+	}
+	b.sendMessageInThreadWithMarkup(ctx, message.Chat.ID, "📅 Select reading date:", message.MessageThreadID, keyboard)
 }
 
 // handleWhoIsNext shows who should read next based on rotation logic
-func (b *Bot) handleWhoIsNext(ctx context.Context, message *tgbotapi.Message) {
+func (b *Bot) handleWhoIsNext(ctx context.Context, message *models.Message) {
 	// Get all participants
 	participants, err := b.db.ListParticipants(ctx)
 	if err != nil {
@@ -93,15 +97,13 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *tgbotapi.Message) {
 			zap.Error(err),
 			zap.Int64("user_id", message.From.ID),
 		)
-		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
 		return
 	}
 
 	if len(participants) == 0 {
 		b.logger.Warn("No participants found", zap.Int64("user_id", message.From.ID))
-		msg := tgbotapi.NewMessage(message.Chat.ID, "No participants found in database")
-		b.sendMessage(msg)
+		b.sendMessageInThread(ctx, message.Chat.ID, "No participants found in database", message.MessageThreadID)
 		return
 	}
 
@@ -112,8 +114,7 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *tgbotapi.Message) {
 			zap.Error(err),
 			zap.Int64("user_id", message.From.ID),
 		)
-		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
 		return
 	}
 
@@ -127,33 +128,29 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *tgbotapi.Message) {
 	nextReader := ComputeNextParticipant(participants, lastParticipant)
 
 	if nextReader == "" {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "No child participants found in database")
-		b.sendMessage(msg)
+		b.sendMessageInThread(ctx, message.Chat.ID, "No child participants found in database", message.MessageThreadID)
 		return
 	}
 
 	text := fmt.Sprintf("Next to read: %s", nextReader)
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	b.sendMessage(msg)
+	b.sendMessageInThread(ctx, message.Chat.ID, text, message.MessageThreadID)
 }
 
 // handleLast shows the last 10 reading events
-func (b *Bot) handleLast(ctx context.Context, message *tgbotapi.Message) {
+func (b *Bot) handleLast(ctx context.Context, message *models.Message) {
 	events, err := b.db.GetLastEvents(ctx, 10)
 	if err != nil {
 		b.logger.Error("Failed to get last events",
 			zap.Error(err),
 			zap.Int64("user_id", message.From.ID),
 		)
-		msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("Error: %v", err))
-		b.sendMessage(msg)
+		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
 		return
 	}
 
 	if len(events) == 0 {
 		b.logger.Info("No reading events found", zap.Int64("user_id", message.From.ID))
-		msg := tgbotapi.NewMessage(message.Chat.ID, "No reading events recorded yet.")
-		b.sendMessage(msg)
+		b.sendMessageInThread(ctx, message.Chat.ID, "No reading events recorded yet.", message.MessageThreadID)
 		return
 	}
 
@@ -172,34 +169,38 @@ func (b *Bot) handleLast(ctx context.Context, message *tgbotapi.Message) {
 			event.ParticipantName))
 	}
 
-	msg := tgbotapi.NewMessage(message.Chat.ID, text.String())
-	b.sendMessage(msg)
+	b.sendMessageInThread(ctx, message.Chat.ID, text.String(), message.MessageThreadID)
 }
 
 // handleStatsStart initiates the statistics conversation
-func (b *Bot) handleStatsStart(ctx context.Context, message *tgbotapi.Message) {
+func (b *Bot) handleStatsStart(ctx context.Context, message *models.Message) {
 	userID := message.From.ID
+
+	b.statesMu.Lock()
 	b.states[userID] = &ConversationState{
-		Command:           "stats",
-		Step:              1,
-		Data:              make(map[string]interface{}),
-		OriginalMessageID: message.MessageID,
+		Command:         "stats",
+		Step:            1,
+		Data:            make(map[string]interface{}),
+		MessageThreadID: message.MessageThreadID,
 	}
+	b.statesMu.Unlock()
 
 	// Show time period selection
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📅 Specific month", "stats_period:month"),
-			tgbotapi.NewInlineKeyboardButtonData("📅 Calendar year", "stats_period:year"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⏮ Last 2 months", "stats_period:last2"),
-			tgbotapi.NewInlineKeyboardButtonData("⏮ Last 3 months", "stats_period:last3"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("⏮ Last 6 months", "stats_period:last6"),
-			tgbotapi.NewInlineKeyboardButtonData("⏮ Last 12 months", "stats_period:last12"),
-		),
-	)
-	b.sendReplyWithMarkup(message.Chat.ID, "📊 Select time period for statistics:", message.MessageID, keyboard)
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "📅 Specific month", CallbackData: "stats_period:month"},
+				{Text: "📅 Calendar year", CallbackData: "stats_period:year"},
+			},
+			{
+				{Text: "⏮ Last 2 months", CallbackData: "stats_period:last2"},
+				{Text: "⏮ Last 3 months", CallbackData: "stats_period:last3"},
+			},
+			{
+				{Text: "⏮ Last 6 months", CallbackData: "stats_period:last6"},
+				{Text: "⏮ Last 12 months", CallbackData: "stats_period:last12"},
+			},
+		},
+	}
+	b.sendMessageInThreadWithMarkup(ctx, message.Chat.ID, "📊 Select time period for statistics:", message.MessageThreadID, keyboard)
 }

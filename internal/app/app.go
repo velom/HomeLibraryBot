@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/go-telegram/bot/models"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 
@@ -167,7 +167,7 @@ func (a *App) initHTTPServer() {
 			return
 		}
 
-		var update tgbotapi.Update
+		var update models.Update
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 			a.logger.Error("Error decoding webhook update",
 				zap.Error(err),
@@ -177,10 +177,10 @@ func (a *App) initHTTPServer() {
 			return
 		}
 
-		a.logger.Debug("Received webhook update", zap.Int("update_id", update.UpdateID))
+		a.logger.Debug("Received webhook update", zap.Int("update_id", int(update.ID)))
 
 		// Process update in background to respond quickly to Telegram
-		go a.bot.HandleWebhookUpdate(update)
+		go a.bot.HandleWebhookUpdate(context.Background(), &update)
 
 		w.WriteHeader(http.StatusOK)
 	})
@@ -207,6 +207,8 @@ func (a *App) Run() error {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Start bot in appropriate mode
+	ctx := context.Background()
+
 	if a.config.WebhookMode {
 		// Webhook mode: configure webhook and wait for HTTP requests
 		a.logger.Info("Starting bot in WEBHOOK mode", zap.String("webhook_url", a.config.WebhookURL))
@@ -219,7 +221,7 @@ func (a *App) Run() error {
 		// Polling mode: actively poll Telegram servers
 		go func() {
 			a.logger.Info("Starting bot in POLLING mode")
-			if err := a.bot.Start(); err != nil {
+			if err := a.bot.Start(ctx); err != nil {
 				a.logger.Fatal("Failed to start bot", zap.Error(err))
 			}
 		}()

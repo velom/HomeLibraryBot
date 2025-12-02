@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
 )
 
@@ -34,13 +34,13 @@ func TestBot_NewBookConversation(t *testing.T) {
 	chatID := int64(456)
 
 	// Step 1: Start /new_book command
-	message1 := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
+	message1 := &models.Message{
+		From: &models.User{ID: userID},
+		Chat: models.Chat{ID: chatID},
 		Text: "/new_book",
 	}
 
-	bot.handleNewBookStart(message1)
+	bot.handleNewBookStart(ctx, message1)
 
 	// Verify conversation state
 	state, ok := bot.states[userID]
@@ -55,9 +55,9 @@ func TestBot_NewBookConversation(t *testing.T) {
 	}
 
 	// Step 2: Provide book name (conversation completes immediately)
-	message2 := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
+	message2 := &models.Message{
+		From: &models.User{ID: userID},
+		Chat: models.Chat{ID: chatID},
 		Text: "Test Book",
 	}
 
@@ -123,9 +123,9 @@ func TestBot_ReadConversation(t *testing.T) {
 	bot.states[userID] = state
 
 	// Step 1: Provide custom date
-	message1 := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
+	message1 := &models.Message{
+		From: &models.User{ID: userID},
+		Chat: models.Chat{ID: chatID},
 		Text: "today",
 	}
 
@@ -181,9 +181,9 @@ func TestBot_InvalidBookSelection(t *testing.T) {
 	bot.states[userID] = state
 
 	// Try to select invalid book index
-	message := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
+	message := &models.Message{
+		From: &models.User{ID: userID},
+		Chat: models.Chat{ID: chatID},
 		Text: "999", // Invalid index
 	}
 
@@ -222,9 +222,9 @@ func TestBot_PanicRecovery(t *testing.T) {
 	}
 	bot.states[userID] = state
 
-	message := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
+	message := &models.Message{
+		From: &models.User{ID: userID},
+		Chat: models.Chat{ID: chatID},
 		Text: "1",
 	}
 
@@ -235,7 +235,7 @@ func TestBot_PanicRecovery(t *testing.T) {
 		}
 	}()
 
-	bot.handleMessage(message)
+	bot.handleMessage(ctx, message)
 
 	// If we reach here, panic was recovered
 	t.Log("Panic was successfully recovered")
@@ -269,18 +269,18 @@ func TestBot_CommandAfterCallbackCompletion(t *testing.T) {
 	}
 
 	// Try to issue a new command - this should work now
-	message := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
+	message := &models.Message{
+		From: &models.User{ID: userID},
+		Chat: models.Chat{ID: chatID},
 		Text: "/start",
 	}
-	message.Entities = []tgbotapi.MessageEntity{
+	message.Entities = []models.MessageEntity{
 		{Type: "bot_command", Offset: 0, Length: 6},
 	}
 
 	// Before the fix, this would call handleConversation and ignore the /start command
 	// After the fix, the stale state should be cleaned up and /start should be processed
-	bot.handleMessage(message)
+	bot.handleMessage(ctx, message)
 
 	// Verify the state was cleaned up
 	if _, exists := bot.states[userID]; exists {
@@ -308,16 +308,16 @@ func TestBot_CommandInterruptsConversation(t *testing.T) {
 	chatID := int64(456)
 
 	// Start a /new_book conversation
-	message1 := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
+	message1 := &models.Message{
+		From: &models.User{ID: userID},
+		Chat: models.Chat{ID: chatID},
 		Text: "/new_book",
 	}
-	message1.Entities = []tgbotapi.MessageEntity{
+	message1.Entities = []models.MessageEntity{
 		{Type: "bot_command", Offset: 0, Length: 9},
 	}
 
-	bot.handleMessage(message1)
+	bot.handleMessage(ctx, message1)
 
 	// Verify conversation state was created
 	if _, exists := bot.states[userID]; !exists {
@@ -325,16 +325,16 @@ func TestBot_CommandInterruptsConversation(t *testing.T) {
 	}
 
 	// Now interrupt with a different command (/start)
-	message2 := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
+	message2 := &models.Message{
+		From: &models.User{ID: userID},
+		Chat: models.Chat{ID: chatID},
 		Text: "/start",
 	}
-	message2.Entities = []tgbotapi.MessageEntity{
+	message2.Entities = []models.MessageEntity{
 		{Type: "bot_command", Offset: 0, Length: 6},
 	}
 
-	bot.handleMessage(message2)
+	bot.handleMessage(ctx, message2)
 
 	// Verify the old conversation state was cleaned up
 	if _, exists := bot.states[userID]; exists {
@@ -348,16 +348,16 @@ func TestBot_CommandInterruptsConversation(t *testing.T) {
 	}
 
 	// Start a /read conversation and interrupt it too
-	message3 := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
+	message3 := &models.Message{
+		From: &models.User{ID: userID},
+		Chat: models.Chat{ID: chatID},
 		Text: "/read",
 	}
-	message3.Entities = []tgbotapi.MessageEntity{
+	message3.Entities = []models.MessageEntity{
 		{Type: "bot_command", Offset: 0, Length: 5},
 	}
 
-	bot.handleMessage(message3)
+	bot.handleMessage(ctx, message3)
 
 	// Verify state exists
 	if _, exists := bot.states[userID]; !exists {
@@ -365,16 +365,16 @@ func TestBot_CommandInterruptsConversation(t *testing.T) {
 	}
 
 	// Interrupt with /who_is_next
-	message4 := &tgbotapi.Message{
-		From: &tgbotapi.User{ID: userID},
-		Chat: &tgbotapi.Chat{ID: chatID},
+	message4 := &models.Message{
+		From: &models.User{ID: userID},
+		Chat: models.Chat{ID: chatID},
 		Text: "/who_is_next",
 	}
-	message4.Entities = []tgbotapi.MessageEntity{
+	message4.Entities = []models.MessageEntity{
 		{Type: "bot_command", Offset: 0, Length: 12},
 	}
 
-	bot.handleMessage(message4)
+	bot.handleMessage(ctx, message4)
 
 	// Verify state was cleaned up
 	if _, exists := bot.states[userID]; exists {
