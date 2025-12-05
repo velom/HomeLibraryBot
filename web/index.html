@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Library Reading Event</title>
+
+    <!-- Telegram Mini App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <!-- Flatpickr CSS for calendar widget -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+
+    <!-- Fuse.js for fuzzy search -->
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0"></script>
+
+    <!-- Flatpickr JS -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            padding: 16px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            font-size: 14px;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        input[type="text"],
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--tg-theme-hint-color, #ccc);
+            border-radius: 8px;
+            font-size: 16px;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        input[type="text"]:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--tg-theme-button-color, #3390ec);
+        }
+
+        .search-results {
+            position: relative;
+            max-height: 250px;
+            overflow-y: auto;
+            border: 1px solid var(--tg-theme-hint-color, #ccc);
+            border-radius: 8px;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            display: none;
+            margin-top: 4px;
+        }
+
+        .search-results.visible {
+            display: block;
+        }
+
+        .search-result-item {
+            padding: 12px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--tg-theme-hint-color, #eee);
+            transition: background-color 0.2s;
+        }
+
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .search-result-item:hover {
+            background-color: var(--tg-theme-section-bg-color, #f5f5f5);
+        }
+
+        .search-result-item.selected {
+            background-color: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #ffffff);
+        }
+
+        .selected-book {
+            padding: 12px;
+            border: 2px solid var(--tg-theme-button-color, #3390ec);
+            border-radius: 8px;
+            margin-top: 8px;
+            background-color: var(--tg-theme-section-bg-color, #f5f5f5);
+            display: none;
+        }
+
+        .selected-book.visible {
+            display: block;
+        }
+
+        .selected-book-name {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .clear-selection {
+            color: var(--tg-theme-link-color, #3390ec);
+            text-decoration: underline;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 4px;
+            display: inline-block;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            background-color: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .error {
+            color: #ff3b30;
+            font-size: 14px;
+            margin-top: 8px;
+            display: none;
+        }
+
+        .error.visible {
+            display: block;
+        }
+
+        .success {
+            color: #34c759;
+            font-size: 14px;
+            margin-top: 8px;
+            display: none;
+        }
+
+        .success.visible {
+            display: block;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--tg-theme-hint-color, #999);
+        }
+
+        .no-results {
+            padding: 12px;
+            text-align: center;
+            color: var(--tg-theme-hint-color, #999);
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>📚 Add Reading Event</h1>
+
+    <form id="eventForm">
+        <div class="form-group">
+            <label for="date">📅 Date</label>
+            <input type="text" id="date" name="date" placeholder="Select date" readonly>
+        </div>
+
+        <div class="form-group">
+            <label for="bookSearch">📖 Book</label>
+            <input type="text" id="bookSearch" placeholder="Search for a book..." autocomplete="off">
+            <div id="searchResults" class="search-results"></div>
+            <div id="selectedBook" class="selected-book">
+                <div class="selected-book-name" id="selectedBookName"></div>
+                <span class="clear-selection" id="clearSelection">Clear selection</span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="participant">👤 Participant</label>
+            <select id="participant" name="participant" required>
+                <option value="">Select a participant...</option>
+            </select>
+        </div>
+
+        <button type="submit" id="submitBtn">Add Reading Event</button>
+
+        <div id="error" class="error"></div>
+        <div id="success" class="success"></div>
+    </form>
+
+    <script>
+        // Initialize Telegram Mini App
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+
+        // Apply Telegram theme colors
+        document.body.style.backgroundColor = tg.themeParams.bg_color || '#ffffff';
+        document.body.style.color = tg.themeParams.text_color || '#000000';
+
+        // State
+        let books = [];
+        let participants = [];
+        let selectedBook = null;
+        let fuse = null;
+
+        // DOM elements
+        const dateInput = document.getElementById('date');
+        const bookSearchInput = document.getElementById('bookSearch');
+        const searchResultsDiv = document.getElementById('searchResults');
+        const selectedBookDiv = document.getElementById('selectedBook');
+        const selectedBookNameSpan = document.getElementById('selectedBookName');
+        const clearSelectionBtn = document.getElementById('clearSelection');
+        const participantSelect = document.getElementById('participant');
+        const eventForm = document.getElementById('eventForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const errorDiv = document.getElementById('error');
+        const successDiv = document.getElementById('success');
+
+        // Initialize flatpickr calendar
+        const datePicker = flatpickr(dateInput, {
+            dateFormat: 'Y-m-d',
+            defaultDate: 'today',
+            maxDate: 'today',
+            allowInput: false,
+            disableMobile: false
+        });
+
+        // Utility functions
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.classList.add('visible');
+            successDiv.classList.remove('visible');
+        }
+
+        function showSuccess(message) {
+            successDiv.textContent = message;
+            successDiv.classList.add('visible');
+            errorDiv.classList.remove('visible');
+        }
+
+        function hideMessages() {
+            errorDiv.classList.remove('visible');
+            successDiv.classList.remove('visible');
+        }
+
+        // API calls
+        async function fetchBooks() {
+            try {
+                const response = await fetch('/api/books', {
+                    headers: {
+                        'Authorization': `tma ${tg.initData}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch books');
+                }
+
+                books = await response.json();
+
+                // Initialize Fuse.js for fuzzy search
+                fuse = new Fuse(books, {
+                    keys: ['name'],
+                    threshold: 0.3,
+                    includeScore: true
+                });
+
+                return books;
+            } catch (error) {
+                console.error('Error fetching books:', error);
+                showError('Failed to load books');
+                return [];
+            }
+        }
+
+        async function fetchParticipants() {
+            try {
+                const response = await fetch('/api/participants', {
+                    headers: {
+                        'Authorization': `tma ${tg.initData}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch participants');
+                }
+
+                participants = await response.json();
+
+                // Populate participant select
+                participantSelect.innerHTML = '<option value="">Select a participant...</option>';
+                participants.forEach(participant => {
+                    const option = document.createElement('option');
+                    option.value = participant.name;
+                    option.textContent = participant.name;
+                    participantSelect.appendChild(option);
+                });
+
+                return participants;
+            } catch (error) {
+                console.error('Error fetching participants:', error);
+                showError('Failed to load participants');
+                return [];
+            }
+        }
+
+        async function createEvent(date, bookName, participantName) {
+            try {
+                const response = await fetch('/api/events', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `tma ${tg.initData}`
+                    },
+                    body: JSON.stringify({
+                        date: date,
+                        book_name: bookName,
+                        participant_name: participantName
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || 'Failed to create event');
+                }
+
+                return await response.json();
+            } catch (error) {
+                console.error('Error creating event:', error);
+                throw error;
+            }
+        }
+
+        // Book search functionality
+        function performSearch(query) {
+            if (!query || query.trim() === '') {
+                searchResultsDiv.innerHTML = '';
+                searchResultsDiv.classList.remove('visible');
+                return;
+            }
+
+            const results = fuse.search(query);
+
+            if (results.length === 0) {
+                searchResultsDiv.innerHTML = '<div class="no-results">No books found</div>';
+                searchResultsDiv.classList.add('visible');
+                return;
+            }
+
+            searchResultsDiv.innerHTML = '';
+            results.slice(0, 10).forEach(result => {
+                const div = document.createElement('div');
+                div.className = 'search-result-item';
+                div.textContent = result.item.name;
+                div.addEventListener('click', () => selectBook(result.item));
+                searchResultsDiv.appendChild(div);
+            });
+
+            searchResultsDiv.classList.add('visible');
+        }
+
+        function selectBook(book) {
+            selectedBook = book;
+            selectedBookNameSpan.textContent = book.name;
+            selectedBookDiv.classList.add('visible');
+            bookSearchInput.value = '';
+            searchResultsDiv.classList.remove('visible');
+            hideMessages();
+        }
+
+        function clearBookSelection() {
+            selectedBook = null;
+            selectedBookDiv.classList.remove('visible');
+            bookSearchInput.value = '';
+            searchResultsDiv.classList.remove('visible');
+        }
+
+        // Event handlers
+        bookSearchInput.addEventListener('input', (e) => {
+            performSearch(e.target.value);
+        });
+
+        bookSearchInput.addEventListener('focus', (e) => {
+            if (e.target.value) {
+                performSearch(e.target.value);
+            }
+        });
+
+        // Close search results when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!bookSearchInput.contains(e.target) && !searchResultsDiv.contains(e.target)) {
+                searchResultsDiv.classList.remove('visible');
+            }
+        });
+
+        clearSelectionBtn.addEventListener('click', clearBookSelection);
+
+        eventForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideMessages();
+
+            const date = dateInput.value;
+            const participantName = participantSelect.value;
+
+            // Validation
+            if (!date) {
+                showError('Please select a date');
+                return;
+            }
+
+            if (!selectedBook) {
+                showError('Please select a book');
+                return;
+            }
+
+            if (!participantName) {
+                showError('Please select a participant');
+                return;
+            }
+
+            // Disable form
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Adding...';
+
+            try {
+                await createEvent(date, selectedBook.name, participantName);
+                showSuccess('Reading event added successfully!');
+
+                // Reset form
+                setTimeout(() => {
+                    eventForm.reset();
+                    clearBookSelection();
+                    datePicker.setDate('today');
+
+                    // Close Mini App after successful submission
+                    setTimeout(() => {
+                        tg.close();
+                    }, 1500);
+                }, 1000);
+            } catch (error) {
+                showError(error.message || 'Failed to add reading event');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Add Reading Event';
+            }
+        });
+
+        // Initialize data on page load
+        async function init() {
+            try {
+                await Promise.all([
+                    fetchBooks(),
+                    fetchParticipants()
+                ]);
+
+                if (books.length === 0) {
+                    showError('No readable books available. Please add books first.');
+                    submitBtn.disabled = true;
+                }
+
+                if (participants.length === 0) {
+                    showError('No participants found. Please add participants first.');
+                    submitBtn.disabled = true;
+                }
+            } catch (error) {
+                console.error('Initialization error:', error);
+                showError('Failed to initialize app');
+            }
+        }
+
+        // Start the app
+        init();
+    </script>
+</body>
+</html>

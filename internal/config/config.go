@@ -16,6 +16,9 @@ type Config struct {
 	WebhookMode bool   // If true, use webhook mode; if false, use polling mode
 	WebhookURL  string // URL for webhook (required if WebhookMode is true)
 
+	// HTTP server configuration
+	HTTPPort int // Port for Mini App HTTP server (default: 8081)
+
 	// ClickHouse configuration
 	ClickHouseHost     string
 	ClickHousePort     int
@@ -59,6 +62,18 @@ func LoadFromEnv() (*Config, error) {
 		if config.WebhookURL == "" {
 			return nil, fmt.Errorf("WEBHOOK_URL is required when WEBHOOK_MODE is true")
 		}
+	}
+
+	// HTTP server port (default: 8081)
+	httpPortStr := os.Getenv("HTTP_PORT")
+	if httpPortStr == "" {
+		config.HTTPPort = 8081
+	} else {
+		port, err := strconv.Atoi(httpPortStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid HTTP_PORT: %w", err)
+		}
+		config.HTTPPort = port
 	}
 
 	// Use Mock DB (default: false)

@@ -122,12 +122,15 @@ func (a *App) initDatabase() error {
 
 // initBot initializes the Telegram bot
 func (a *App) initBot() error {
-	telegramBot, err := bot.NewBot(a.config.TelegramToken, a.db, a.config.AllowedUserIDs, a.logger)
+	telegramBot, err := bot.NewBot(a.config.TelegramToken, a.db, a.config.AllowedUserIDs, a.config.HTTPPort, a.logger)
 	if err != nil {
 		a.logger.Error("Failed to create Telegram bot", zap.Error(err))
 		return fmt.Errorf("failed to create Telegram bot: %w", err)
 	}
-	a.logger.Info("Bot created successfully", zap.Int64s("allowed_users", a.config.AllowedUserIDs))
+	a.logger.Info("Bot created successfully",
+		zap.Int64s("allowed_users", a.config.AllowedUserIDs),
+		zap.Int("http_port", a.config.HTTPPort),
+	)
 
 	a.bot = telegramBot
 	return nil
@@ -236,11 +239,21 @@ func (a *App) Run() error {
 
 // Shutdown gracefully shuts down the application
 func (a *App) Shutdown() error {
-	// Shutdown HTTP server gracefully
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := a.server.Shutdown(shutdownCtx); err != nil {
-		a.logger.Error("HTTP server shutdown error", zap.Error(err))
+
+	// Shutdown bot (including its HTTP server)
+	if a.bot != nil {
+		if err := a.bot.Shutdown(shutdownCtx); err != nil {
+			a.logger.Error("Bot shutdown error", zap.Error(err))
+		}
+	}
+
+	// Shutdown app HTTP server gracefully
+	if a.server != nil {
+		if err := a.server.Shutdown(shutdownCtx); err != nil {
+			a.logger.Error("HTTP server shutdown error", zap.Error(err))
+		}
 	}
 
 	// Close database
