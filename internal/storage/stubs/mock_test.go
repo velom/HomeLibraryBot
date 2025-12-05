@@ -10,10 +10,17 @@ func TestMockDB_CreateBook(t *testing.T) {
 	db := NewMockDB()
 	ctx := context.Background()
 
-	// Initialize database
+	// Initialize database (initializes with 10 default test books)
 	if err := db.Initialize(ctx); err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
+
+	// Get initial count
+	initialBooks, err := db.ListReadableBooks(ctx)
+	if err != nil {
+		t.Fatalf("Failed to list readable books: %v", err)
+	}
+	initialCount := len(initialBooks)
 
 	// Create a book
 	id, err := db.CreateBook(ctx, "Test Book")
@@ -25,22 +32,30 @@ func TestMockDB_CreateBook(t *testing.T) {
 		t.Fatal("Expected non-empty book ID")
 	}
 
-	// Verify book appears in readable books list
+	// Verify book count increased by 1
 	books, err := db.ListReadableBooks(ctx)
 	if err != nil {
 		t.Fatalf("Failed to list readable books: %v", err)
 	}
 
-	if len(books) != 1 {
-		t.Errorf("Expected 1 book, got %d", len(books))
+	if len(books) != initialCount+1 {
+		t.Errorf("Expected %d books, got %d", initialCount+1, len(books))
 	}
 
-	if books[0].Name != "Test Book" {
-		t.Errorf("Expected 'Test Book', got '%s'", books[0].Name)
+	// Find the created book
+	found := false
+	for _, book := range books {
+		if book.Name == "Test Book" {
+			found = true
+			if !book.IsReadable {
+				t.Error("Expected book to be readable by default")
+			}
+			break
+		}
 	}
 
-	if !books[0].IsReadable {
-		t.Error("Expected book to be readable by default")
+	if !found {
+		t.Error("Expected to find 'Test Book' in the list")
 	}
 }
 
@@ -51,6 +66,13 @@ func TestMockDB_ListReadableBooks(t *testing.T) {
 	if err := db.Initialize(ctx); err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
+
+	// Get initial count (should have default test books)
+	initialBooks, err := db.ListReadableBooks(ctx)
+	if err != nil {
+		t.Fatalf("Failed to list readable books: %v", err)
+	}
+	initialCount := len(initialBooks)
 
 	// Create multiple books
 	_, _ = db.CreateBook(ctx, "Book A")
@@ -63,15 +85,28 @@ func TestMockDB_ListReadableBooks(t *testing.T) {
 		t.Fatalf("Failed to list readable books: %v", err)
 	}
 
-	if len(books) != 3 {
-		t.Errorf("Expected 3 readable books, got %d", len(books))
+	expectedCount := initialCount + 3
+	if len(books) != expectedCount {
+		t.Errorf("Expected %d readable books, got %d", expectedCount, len(books))
 	}
 
-	// Books should be sorted by name
-	expectedNames := []string{"Book A", "Book B", "Book C"}
-	for i, book := range books {
-		if book.Name != expectedNames[i] {
-			t.Errorf("Expected book %d to be '%s', got '%s'", i, expectedNames[i], book.Name)
+	// Books should be sorted by name - verify the newly created books are in order
+	newBooks := make(map[string]bool)
+	for _, book := range books {
+		if book.Name == "Book A" || book.Name == "Book B" || book.Name == "Book C" {
+			newBooks[book.Name] = true
+		}
+	}
+
+	if len(newBooks) != 3 {
+		t.Errorf("Expected to find 3 newly created books, found %d", len(newBooks))
+	}
+
+	// Verify all books are sorted by name
+	for i := 0; i < len(books)-1; i++ {
+		if books[i].Name > books[i+1].Name {
+			t.Error("Expected books to be sorted by name")
+			break
 		}
 	}
 }

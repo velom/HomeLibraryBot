@@ -25,7 +25,7 @@ func NewMockDB() *MockDB {
 	}
 }
 
-// Initialize sets up default participants for testing
+// Initialize sets up default participants and books for testing
 func (m *MockDB) Initialize(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -46,6 +46,27 @@ func (m *MockDB) Initialize(ctx context.Context) error {
 	m.participants["Dad"] = models.Participant{
 		Name:     "Dad",
 		IsParent: true,
+	}
+
+	// Add default test books
+	testBooks := []string{
+		"Harry Potter and the Philosopher's Stone",
+		"The Hobbit",
+		"Charlotte's Web",
+		"The Cat in the Hat",
+		"Where the Wild Things Are",
+		"Green Eggs and Ham",
+		"The Very Hungry Caterpillar",
+		"Goodnight Moon",
+		"Matilda",
+		"Charlie and the Chocolate Factory",
+	}
+
+	for _, bookName := range testBooks {
+		m.books[bookName] = models.Book{
+			Name:       bookName,
+			IsReadable: true,
+		}
 	}
 
 	return nil

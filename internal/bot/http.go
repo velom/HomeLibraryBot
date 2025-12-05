@@ -18,13 +18,15 @@ import (
 
 // HTTPServer handles HTTP requests for the Mini App
 type HTTPServer struct {
-	bot *Bot
+	bot         *Bot
+	webhookMode bool // If false (polling mode), skip authentication for easier local dev
 }
 
 // NewHTTPServer creates a new HTTP server for the Mini App
-func NewHTTPServer(bot *Bot) *HTTPServer {
+func NewHTTPServer(bot *Bot, webhookMode bool) *HTTPServer {
 	return &HTTPServer{
-		bot: bot,
+		bot:         bot,
+		webhookMode: webhookMode,
 	}
 }
 
@@ -145,8 +147,19 @@ func (hs *HTTPServer) validateTelegramInitData(initData string) (int64, error) {
 }
 
 // authMiddleware validates Telegram Mini App authentication
+// In polling mode (webhookMode=false), authentication is skipped for easier local development
 func (hs *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Skip authentication in polling mode (local development)
+		if !hs.webhookMode {
+			hs.bot.logger.Debug("Skipping authentication (polling mode)",
+				zap.String("path", r.URL.Path),
+				zap.String("remote_addr", r.RemoteAddr),
+			)
+			next(w, r)
+			return
+		}
+
 		// Extract authorization header
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" || !strings.HasPrefix(authHeader, "tma ") {
