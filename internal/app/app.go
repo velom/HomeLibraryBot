@@ -191,8 +191,14 @@ func (a *App) initHTTPServer() {
 	})
 
 	// Register Mini App routes (web-app and API endpoints)
-	httpServer := bot.NewHTTPServer(a.bot)
+	// Pass webhook mode to enable/disable authentication
+	httpServer := bot.NewHTTPServer(a.bot, a.config.WebhookMode)
 	httpServer.RegisterRoutes(mux)
+
+	a.logger.Info("HTTP routes registered",
+		zap.Bool("webhook_mode", a.config.WebhookMode),
+		zap.String("auth_required", fmt.Sprintf("%v", a.config.WebhookMode)),
+	)
 
 	a.server = &http.Server{
 		Addr:         ":" + port,

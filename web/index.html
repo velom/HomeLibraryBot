@@ -289,7 +289,7 @@
                     throw new Error('Failed to fetch books');
                 }
 
-                books = await response.json();
+                books = await response.json() || [];
 
                 // Initialize Fuse.js for fuzzy search
                 fuse = new Fuse(books, {
@@ -318,7 +318,7 @@
                     throw new Error('Failed to fetch participants');
                 }
 
-                participants = await response.json();
+                participants = await response.json() || [];
 
                 // Populate participant select
                 participantSelect.innerHTML = '<option value="">Select a participant...</option>';
