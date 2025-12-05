@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,57 +13,49 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"library/web"
 )
 
 // HTTPServer handles HTTP requests for the Mini App
 type HTTPServer struct {
-	bot    *Bot
-	server *http.Server
+	bot *Bot
 }
 
 // NewHTTPServer creates a new HTTP server for the Mini App
-func NewHTTPServer(bot *Bot, port int) *HTTPServer {
-	mux := http.NewServeMux()
-
-	hs := &HTTPServer{
+func NewHTTPServer(bot *Bot) *HTTPServer {
+	return &HTTPServer{
 		bot: bot,
-		server: &http.Server{
-			Addr:    fmt.Sprintf(":%d", port),
-			Handler: mux,
-		},
 	}
+}
 
-	// Static file serving
-	mux.HandleFunc("/", hs.handleIndex)
+// RegisterRoutes registers Mini App routes on the provided mux
+func (hs *HTTPServer) RegisterRoutes(mux *http.ServeMux) {
+	// Static file serving for Mini App
+	mux.HandleFunc("/web-app", hs.handleIndex)
 
 	// API endpoints
 	mux.HandleFunc("/api/books", hs.handleBooks)
 	mux.HandleFunc("/api/participants", hs.handleParticipants)
 	mux.HandleFunc("/api/events", hs.handleEvents)
-
-	return hs
 }
 
-// Start starts the HTTP server
-func (hs *HTTPServer) Start() error {
-	hs.bot.logger.Info("Starting HTTP server", zap.String("addr", hs.server.Addr))
-	return hs.server.ListenAndServe()
-}
-
-// Shutdown gracefully shuts down the HTTP server
-func (hs *HTTPServer) Shutdown(ctx context.Context) error {
-	hs.bot.logger.Info("Shutting down HTTP server")
-	return hs.server.Shutdown(ctx)
-}
-
-// handleIndex serves the Mini App HTML
+// handleIndex serves the Mini App HTML from embedded filesystem
 func (hs *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	if r.URL.Path != "/web-app" {
 		http.NotFound(w, r)
 		return
 	}
 
-	http.ServeFile(w, r, "web/index.html")
+	// Read the embedded index.html
+	content, err := web.Content.ReadFile("index.html")
+	if err != nil {
+		hs.bot.logger.Error("Failed to read embedded index.html", zap.Error(err))
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(content)
 }
 
 // validateTelegramInitData validates the Telegram Mini App initData

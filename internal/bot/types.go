@@ -16,7 +16,6 @@ type Bot struct {
 	states       map[int64]*ConversationState
 	statesMu     sync.RWMutex
 	logger       *zap.Logger
-	httpServer   *HTTPServer
 }
 
 // ConversationState tracks the state of multi-step commands
