@@ -11,7 +11,7 @@ import (
 )
 
 // NewBot creates a new Telegram bot
-func NewBot(token string, db storage.Storage, allowedUserIDs []int64, httpPort int, logger *zap.Logger) (*Bot, error) {
+func NewBot(token string, db storage.Storage, allowedUserIDs []int64, logger *zap.Logger) (*Bot, error) {
 	allowedUsers := make(map[int64]bool)
 	for _, id := range allowedUserIDs {
 		allowedUsers[id] = true
@@ -37,9 +37,6 @@ func NewBot(token string, db storage.Storage, allowedUserIDs []int64, httpPort i
 	}
 
 	botWrapper.api = api
-
-	// Create HTTP server for Mini App
-	botWrapper.httpServer = NewHTTPServer(botWrapper, httpPort)
 
 	// Get bot info
 	me, err := api.GetMe(context.Background())

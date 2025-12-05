@@ -122,35 +122,37 @@ func (a *App) initDatabase() error {
 
 // initBot initializes the Telegram bot
 func (a *App) initBot() error {
-	telegramBot, err := bot.NewBot(a.config.TelegramToken, a.db, a.config.AllowedUserIDs, a.config.HTTPPort, a.logger)
+	telegramBot, err := bot.NewBot(a.config.TelegramToken, a.db, a.config.AllowedUserIDs, a.logger)
 	if err != nil {
 		a.logger.Error("Failed to create Telegram bot", zap.Error(err))
 		return fmt.Errorf("failed to create Telegram bot: %w", err)
 	}
 	a.logger.Info("Bot created successfully",
 		zap.Int64s("allowed_users", a.config.AllowedUserIDs),
-		zap.Int("http_port", a.config.HTTPPort),
 	)
 
 	a.bot = telegramBot
 	return nil
 }
 
-// initHTTPServer initializes the HTTP server for health checks and webhook
+// initHTTPServer initializes the HTTP server for health checks, webhook, and Mini App
 func (a *App) initHTTPServer() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080" // Default port
 	}
 
+	// Create HTTP mux
+	mux := http.NewServeMux()
+
 	// Health check endpoint
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "OK")
 	})
 
 	// Root endpoint
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		mode := "polling"
 		if a.config.WebhookMode {
@@ -160,7 +162,7 @@ func (a *App) initHTTPServer() {
 	})
 
 	// Webhook endpoint (only used in webhook mode)
-	http.HandleFunc("/telegram-webhook", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/telegram-webhook", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			a.logger.Warn("Invalid method for webhook endpoint",
 				zap.String("method", r.Method),
@@ -188,8 +190,13 @@ func (a *App) initHTTPServer() {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	// Register Mini App routes (web-app and API endpoints)
+	httpServer := bot.NewHTTPServer(a.bot)
+	httpServer.RegisterRoutes(mux)
+
 	a.server = &http.Server{
 		Addr:         ":" + port,
+		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
