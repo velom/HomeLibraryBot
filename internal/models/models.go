@@ -26,3 +26,10 @@ type BookStat struct {
 	BookName  string `json:"bookName"`
 	ReadCount int    `json:"readCount"`
 }
+
+// RareBookStat represents rarely read book statistics
+type RareBookStat struct {
+	BookName          string     `json:"bookName"`
+	LastReadDate      *time.Time `json:"lastReadDate"` // nil if never read
+	DaysSinceLastRead int        `json:"daysSinceLastRead"` // -1 if never read
+}

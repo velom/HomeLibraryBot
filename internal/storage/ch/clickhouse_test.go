@@ -396,6 +396,131 @@ func TestClickHouseDB_ConcurrentOperations(t *testing.T) {
 	assert.Len(t, events, numGoroutines)
 }
 
+// TestClickHouseDB_GetRarelyReadBooks tests rarely read books query
+func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Setup test data
+	books := []string{"Book A", "Book B", "Book C", "Book D", "Book E"}
+	for _, book := range books {
+		_, err := db.CreateBook(ctx, book)
+		require.NoError(t, err)
+	}
+
+	// Add participants
+	err := db.conn.Exec(ctx, `INSERT INTO participants (name, is_parent) VALUES (?, ?)`, "Alice", false)
+	require.NoError(t, err)
+	err = db.conn.Exec(ctx, `INSERT INTO participants (name, is_parent) VALUES (?, ?)`, "Bob", false)
+	require.NoError(t, err)
+	err = db.conn.Exec(ctx, `INSERT INTO participants (name, is_parent) VALUES (?, ?)`, "Mom", true)
+	require.NoError(t, err)
+
+	// Create events with different dates
+	now := time.Now().UTC()
+
+	// Book A - read 30 days ago by Alice (child)
+	err = db.CreateEvent(ctx, now.AddDate(0, 0, -30), "Book A", "Alice")
+	require.NoError(t, err)
+
+	// Book B - read 10 days ago by Bob (child)
+	err = db.CreateEvent(ctx, now.AddDate(0, 0, -10), "Book B", "Bob")
+	require.NoError(t, err)
+
+	// Book C - read 20 days ago by Mom (parent)
+	err = db.CreateEvent(ctx, now.AddDate(0, 0, -20), "Book C", "Mom")
+	require.NoError(t, err)
+
+	// Book D - never read
+	// Book E - never read
+
+	t.Run("Children only - includes books never read by children", func(t *testing.T) {
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true)
+		require.NoError(t, err)
+		require.Len(t, stats, 5)
+
+		// Book A should be first (oldest child read: 30 days ago)
+		assert.Equal(t, "Book A", stats[0].BookName)
+		assert.NotNil(t, stats[0].LastReadDate)
+		assert.GreaterOrEqual(t, stats[0].DaysSinceLastRead, 29) // ~30 days
+
+		// Book B should be second (read 10 days ago)
+		assert.Equal(t, "Book B", stats[1].BookName)
+		assert.NotNil(t, stats[1].LastReadDate)
+		assert.GreaterOrEqual(t, stats[1].DaysSinceLastRead, 9) // ~10 days
+
+		// Books C, D, E should have -1 (never read by children or never read at all)
+		// Book C was only read by parent (Mom), so should be -1 for children
+		for i := 2; i < 5; i++ {
+			assert.Equal(t, -1, stats[i].DaysSinceLastRead, "Book %s should have DaysSinceLastRead=-1", stats[i].BookName)
+			assert.Nil(t, stats[i].LastReadDate)
+		}
+	})
+
+	t.Run("All participants - includes all reads", func(t *testing.T) {
+		stats, err := db.GetRarelyReadBooks(ctx, 10, false)
+		require.NoError(t, err)
+		require.Len(t, stats, 5)
+
+		// Book A should be first (30 days ago)
+		assert.Equal(t, "Book A", stats[0].BookName)
+		assert.GreaterOrEqual(t, stats[0].DaysSinceLastRead, 29)
+
+		// Book C should be second (20 days ago by Mom)
+		assert.Equal(t, "Book C", stats[1].BookName)
+		assert.GreaterOrEqual(t, stats[1].DaysSinceLastRead, 19)
+
+		// Book B should be third (10 days ago)
+		assert.Equal(t, "Book B", stats[2].BookName)
+		assert.GreaterOrEqual(t, stats[2].DaysSinceLastRead, 9)
+
+		// Books D and E never read
+		assert.Equal(t, -1, stats[3].DaysSinceLastRead)
+		assert.Nil(t, stats[3].LastReadDate)
+		assert.Equal(t, -1, stats[4].DaysSinceLastRead)
+		assert.Nil(t, stats[4].LastReadDate)
+	})
+
+	t.Run("Limit results", func(t *testing.T) {
+		stats, err := db.GetRarelyReadBooks(ctx, 3, false)
+		require.NoError(t, err)
+		assert.Len(t, stats, 3)
+	})
+
+	t.Run("Empty database returns empty list", func(t *testing.T) {
+		// Create a fresh test DB
+		dbEmpty, cleanupEmpty := setupTestDB(t)
+		defer cleanupEmpty()
+
+		stats, err := dbEmpty.GetRarelyReadBooks(ctx, 10, false)
+		require.NoError(t, err)
+		assert.Empty(t, stats)
+	})
+
+	t.Run("Only never-read books", func(t *testing.T) {
+		// Create a fresh test DB with only books, no events
+		dbNoEvents, cleanupNoEvents := setupTestDB(t)
+		defer cleanupNoEvents()
+
+		_, err := dbNoEvents.CreateBook(ctx, "Never Read 1")
+		require.NoError(t, err)
+		_, err = dbNoEvents.CreateBook(ctx, "Never Read 2")
+		require.NoError(t, err)
+
+		stats, err := dbNoEvents.GetRarelyReadBooks(ctx, 10, false)
+		require.NoError(t, err)
+		require.Len(t, stats, 2)
+
+		// Both should have -1
+		for _, stat := range stats {
+			assert.Equal(t, -1, stat.DaysSinceLastRead)
+			assert.Nil(t, stat.LastReadDate)
+		}
+	})
+}
+
 // TestClickHouseDB_Close tests connection closing
 func TestClickHouseDB_Close(t *testing.T) {
 	db, cleanup := setupTestDB(t)

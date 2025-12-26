@@ -94,6 +94,8 @@ func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 			b.handleLast(ctx, message)
 		case "stats":
 			b.handleStatsStart(ctx, message)
+		case "rare":
+			b.handleRare(ctx, message)
 		default:
 			b.logger.Warn("Unknown command",
 				zap.String("command", cmdText),

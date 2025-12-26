@@ -293,3 +293,37 @@ All storage operations go through the `storage.Storage` interface. To add new op
 2. Implement in `internal/storage/ch/clickhouse.go`
 3. Implement in `internal/storage/stubs/mock.go`
 4. Add tests in `internal/storage/stubs/mock_test.go`
+
+### ClickHouse Type Safety
+
+**CRITICAL: Always use correct Go types when scanning ClickHouse results to avoid runtime type conversion errors.**
+
+Common ClickHouse type mappings:
+- `COUNT(*)` → Use `toInt32()` wrapper → Scan to `int32`
+- `dateDiff()` → Returns `Int64` → **MUST scan to `int64`** (NOT `int32`)
+- Date columns → Scan to `time.Time` or `*time.Time`
+- String columns → Scan to `string`
+
+**Example (CORRECT):**
+```go
+var count int64  // dateDiff returns Int64
+var name string
+err := rows.Scan(&name, &count)
+```
+
+**Example (WRONG - will cause runtime error):**
+```go
+var count int32  // ❌ ERROR: dateDiff returns Int64, cannot scan to int32
+var name string
+err := rows.Scan(&name, &count)
+```
+
+**Rule of thumb:**
+- For aggregate functions wrapped with `toInt32()` → use `int32`
+- For `dateDiff()`, `count()`, or large integers → use `int64`
+- When in doubt, use `int64` (safe for all integer types)
+
+**Special ClickHouse behaviors:**
+- `max(date_column)` on LEFT JOIN with no matches returns `toDateTime(0)` (epoch: 1970-01-01), NOT NULL
+- Always check for epoch when expecting NULL dates: `if(max(e.date) <= toDateTime(0), -1, ...)`
+- In Go code, convert epoch to `nil` pointer: `if lastReadDate.After(epoch) { lastReadPtr = &lastReadDate }`

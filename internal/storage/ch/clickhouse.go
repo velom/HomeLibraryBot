@@ -194,6 +194,89 @@ func (db *ClickHouseDB) GetTopBooks(ctx context.Context, limit int, startDate, e
 	return stats, nil
 }
 
+// GetRarelyReadBooks returns books ordered by how long ago they were last read
+// If childrenOnly is true, only considers reads by children (IsParent=false)
+// If childrenOnly is false, considers reads by all participants
+// Books never read are included with DaysSinceLastRead=-1
+func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool) ([]models.RareBookStat, error) {
+	var query string
+
+	if childrenOnly {
+		// Only consider reads by children
+		query = `
+			SELECT
+				b.name as book_name,
+				max(e.date) as last_read_date,
+				if(max(e.date) <= toDateTime(0), -1, dateDiff('day', max(e.date), now())) as days_since_last_read
+			FROM books b
+			LEFT JOIN (
+				SELECT e.book_name, e.date
+				FROM events e
+				INNER JOIN participants p ON e.participant_name = p.name
+				WHERE p.is_parent = false
+			) e ON b.name = e.book_name
+			WHERE b.is_readable = true
+			GROUP BY b.name
+			ORDER BY
+				(max(e.date) <= toDateTime(0)) ASC,
+				days_since_last_read DESC,
+				book_name ASC
+			LIMIT ?
+		`
+	} else {
+		// Consider reads by all participants
+		query = `
+			SELECT
+				b.name as book_name,
+				max(e.date) as last_read_date,
+				if(max(e.date) <= toDateTime(0), -1, dateDiff('day', max(e.date), now())) as days_since_last_read
+			FROM books b
+			LEFT JOIN events e ON b.name = e.book_name
+			WHERE b.is_readable = true
+			GROUP BY b.name
+			ORDER BY
+				(max(e.date) <= toDateTime(0)) ASC,
+				days_since_last_read DESC,
+				book_name ASC
+			LIMIT ?
+		`
+	}
+
+	rows, err := db.conn.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rarely read books: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []models.RareBookStat
+	epoch := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	for rows.Next() {
+		var bookName string
+		var lastReadDate time.Time
+		var daysSinceLastRead int64
+
+		if err := rows.Scan(&bookName, &lastReadDate, &daysSinceLastRead); err != nil {
+			return nil, fmt.Errorf("failed to scan rare book stat: %w", err)
+		}
+
+		// ClickHouse returns epoch (1970-01-01) for NULL DateTime values
+		// Convert epoch to nil pointer
+		var lastReadPtr *time.Time
+		if lastReadDate.After(epoch) {
+			lastReadPtr = &lastReadDate
+		}
+
+		stats = append(stats, models.RareBookStat{
+			BookName:          bookName,
+			LastReadDate:      lastReadPtr,
+			DaysSinceLastRead: int(daysSinceLastRead),
+		})
+	}
+
+	return stats, nil
+}
+
 // Close closes the database connection
 func (db *ClickHouseDB) Close() error {
 	if db.conn != nil {
