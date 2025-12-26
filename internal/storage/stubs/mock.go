@@ -213,6 +213,78 @@ func (m *MockDB) GetTopBooks(ctx context.Context, limit int, startDate, endDate 
 	return stats, nil
 }
 
+// GetRarelyReadBooks returns books ordered by how long ago they were last read
+// If childrenOnly is true, only considers reads by children (IsParent=false)
+// If childrenOnly is false, considers reads by all participants
+// Books never read are included with DaysSinceLastRead=-1
+func (m *MockDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool) ([]models.RareBookStat, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Map to track last read date for each book
+	lastReadDates := make(map[string]time.Time)
+
+	// Find last read date for each book
+	for _, event := range m.events {
+		// Filter by participant type if needed
+		if childrenOnly {
+			participant, exists := m.participants[event.ParticipantName]
+			if !exists || participant.IsParent {
+				continue
+			}
+		}
+
+		// Update last read date if this event is more recent
+		if lastDate, exists := lastReadDates[event.BookName]; !exists || event.Date.After(lastDate) {
+			lastReadDates[event.BookName] = event.Date
+		}
+	}
+
+	// Build result list
+	var stats []models.RareBookStat
+	now := time.Now()
+
+	for _, book := range m.books {
+		if !book.IsReadable {
+			continue
+		}
+
+		var stat models.RareBookStat
+		stat.BookName = book.Name
+
+		if lastDate, hasBeenRead := lastReadDates[book.Name]; hasBeenRead {
+			stat.LastReadDate = &lastDate
+			stat.DaysSinceLastRead = int(now.Sub(lastDate).Hours() / 24)
+		} else {
+			stat.LastReadDate = nil
+			stat.DaysSinceLastRead = -1
+		}
+
+		stats = append(stats, stat)
+	}
+
+	// Sort: never read first (DaysSinceLastRead=-1), then by days descending, then by name
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].DaysSinceLastRead == -1 && stats[j].DaysSinceLastRead != -1 {
+			return false // never read books go last
+		}
+		if stats[i].DaysSinceLastRead != -1 && stats[j].DaysSinceLastRead == -1 {
+			return true
+		}
+		if stats[i].DaysSinceLastRead != stats[j].DaysSinceLastRead {
+			return stats[i].DaysSinceLastRead > stats[j].DaysSinceLastRead
+		}
+		return stats[i].BookName < stats[j].BookName
+	})
+
+	// Apply limit
+	if limit > 0 && limit < len(stats) {
+		stats = stats[:limit]
+	}
+
+	return stats, nil
+}
+
 // Close does nothing for mock DB
 func (m *MockDB) Close() error {
 	return nil

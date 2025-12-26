@@ -27,6 +27,12 @@ type Storage interface {
 	// If participantName is provided, returns statistics only for that participant
 	GetTopBooks(ctx context.Context, limit int, startDate, endDate time.Time, participantName string) ([]models.BookStat, error)
 
+	// GetRarelyReadBooks returns books ordered by how long ago they were last read
+	// If childrenOnly is true, only considers reads by children (IsParent=false)
+	// If childrenOnly is false, considers reads by all participants
+	// Books never read are included with DaysSinceLastRead=-1
+	GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool) ([]models.RareBookStat, error)
+
 	// Lifecycle
 	Initialize(ctx context.Context) error
 	Close() error

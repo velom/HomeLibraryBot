@@ -18,7 +18,8 @@ Available commands:
 /read - Record a reading event
 /who_is_next - See who should read next
 /last - Show last 10 reading events
-/stats - View reading statistics`
+/stats - View reading statistics
+/rare - Show rarely read books`
 
 	b.sendMessageInThread(ctx, message.Chat.ID, text, message.MessageThreadID)
 }
@@ -203,4 +204,69 @@ func (b *Bot) handleStatsStart(ctx context.Context, message *models.Message) {
 		},
 	}
 	b.sendMessageInThreadWithMarkup(ctx, message.Chat.ID, "📊 Select time period for statistics:", message.MessageThreadID, keyboard)
+}
+
+// handleRare shows rarely read books in two categories: by children and by all participants
+func (b *Bot) handleRare(ctx context.Context, message *models.Message) {
+	const limit = 10
+
+	// Get rarely read books by children
+	childrenStats, err := b.db.GetRarelyReadBooks(ctx, limit, true)
+	if err != nil {
+		b.logger.Error("Failed to get rarely read books by children",
+			zap.Error(err),
+			zap.Int64("user_id", message.From.ID),
+		)
+		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
+		return
+	}
+
+	// Get rarely read books by all participants
+	allStats, err := b.db.GetRarelyReadBooks(ctx, limit, false)
+	if err != nil {
+		b.logger.Error("Failed to get rarely read books by all",
+			zap.Error(err),
+			zap.Int64("user_id", message.From.ID),
+		)
+		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
+		return
+	}
+
+	var text strings.Builder
+	text.WriteString("📚 Rarely read books:\n\n")
+
+	// Children's perspective
+	text.WriteString("👶 By children's choice:\n")
+	if len(childrenStats) == 0 {
+		text.WriteString("No data available\n")
+	} else {
+		for i, stat := range childrenStats {
+			text.WriteString(fmt.Sprintf("%d. %s", i+1, stat.BookName))
+			if stat.DaysSinceLastRead == -1 {
+				text.WriteString(" (never read)")
+			} else {
+				lastReadStr := stat.LastReadDate.Format("2006-01-02")
+				text.WriteString(fmt.Sprintf(" (%d days ago, last: %s)", stat.DaysSinceLastRead, lastReadStr))
+			}
+			text.WriteString("\n")
+		}
+	}
+
+	text.WriteString("\n📖 Overall (all participants):\n")
+	if len(allStats) == 0 {
+		text.WriteString("No data available\n")
+	} else {
+		for i, stat := range allStats {
+			text.WriteString(fmt.Sprintf("%d. %s", i+1, stat.BookName))
+			if stat.DaysSinceLastRead == -1 {
+				text.WriteString(" (never read)")
+			} else {
+				lastReadStr := stat.LastReadDate.Format("2006-01-02")
+				text.WriteString(fmt.Sprintf(" (%d days ago, last: %s)", stat.DaysSinceLastRead, lastReadStr))
+			}
+			text.WriteString("\n")
+		}
+	}
+
+	b.sendMessageInThread(ctx, message.Chat.ID, text.String(), message.MessageThreadID)
 }
