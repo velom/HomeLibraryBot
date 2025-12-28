@@ -381,3 +381,297 @@ func TestBot_CommandInterruptsConversation(t *testing.T) {
 		t.Error("Expected /read conversation to be cancelled when interrupted")
 	}
 }
+
+func TestBot_AuthorizedUserCanSendMessages(t *testing.T) {
+	// Test that authorized users can send messages
+	db := stubs.NewMockDB()
+	ctx := context.Background()
+	if err := db.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	authorizedUserID := int64(123)
+	bot := &Bot{
+		api:          nil,
+		db:           db,
+		allowedUsers: map[int64]bool{authorizedUserID: true},
+		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(),
+	}
+
+	chatID := int64(456)
+
+	// Send /new_book command from authorized user
+	message := &models.Message{
+		From: &models.User{ID: authorizedUserID, Username: "authorized_user"},
+		Chat: models.Chat{ID: chatID},
+		Text: "/new_book",
+	}
+	message.Entities = []models.MessageEntity{
+		{Type: "bot_command", Offset: 0, Length: 9},
+	}
+
+	bot.handleMessage(ctx, message)
+
+	// Verify conversation state was created (command was processed)
+	if _, exists := bot.states[authorizedUserID]; !exists {
+		t.Error("Expected conversation state to be created for authorized user")
+	}
+}
+
+func TestBot_UnauthorizedUserCannotSendMessages(t *testing.T) {
+	// Test that unauthorized users cannot send messages
+	db := stubs.NewMockDB()
+	ctx := context.Background()
+	if err := db.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	authorizedUserID := int64(123)
+	unauthorizedUserID := int64(999)
+
+	bot := &Bot{
+		api:          nil,
+		db:           db,
+		allowedUsers: map[int64]bool{authorizedUserID: true},
+		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(),
+	}
+
+	chatID := int64(456)
+
+	// Send /start command from unauthorized user
+	message := &models.Message{
+		From: &models.User{ID: unauthorizedUserID, Username: "unauthorized_user"},
+		Chat: models.Chat{ID: chatID},
+		Text: "/start",
+	}
+	message.Entities = []models.MessageEntity{
+		{Type: "bot_command", Offset: 0, Length: 6},
+	}
+
+	bot.handleMessage(ctx, message)
+
+	// Verify conversation state was NOT created (command was rejected)
+	if _, exists := bot.states[unauthorizedUserID]; exists {
+		t.Error("Expected no conversation state for unauthorized user")
+	}
+}
+
+func TestBot_UnauthorizedUserCannotContinueConversation(t *testing.T) {
+	// Test that unauthorized users cannot continue conversations
+	db := stubs.NewMockDB()
+	ctx := context.Background()
+	if err := db.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	authorizedUserID := int64(123)
+	unauthorizedUserID := int64(999)
+
+	bot := &Bot{
+		api:          nil,
+		db:           db,
+		allowedUsers: map[int64]bool{authorizedUserID: true},
+		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(),
+	}
+
+	chatID := int64(456)
+
+	// Simulate an unauthorized user trying to continue a conversation
+	// (even if they somehow had a state, they shouldn't be able to proceed)
+	message := &models.Message{
+		From: &models.User{ID: unauthorizedUserID, Username: "unauthorized_user"},
+		Chat: models.Chat{ID: chatID},
+		Text: "Test Book",
+	}
+
+	bot.handleMessage(ctx, message)
+
+	// Verify no state was created or modified
+	if _, exists := bot.states[unauthorizedUserID]; exists {
+		t.Error("Expected no conversation state for unauthorized user")
+	}
+}
+
+func TestBot_AuthorizedUserCanSendCallbackQueries(t *testing.T) {
+	// Test that authorized users can send callback queries
+	db := stubs.NewMockDB()
+	ctx := context.Background()
+	if err := db.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	authorizedUserID := int64(123)
+	bot := &Bot{
+		api:          nil,
+		db:           db,
+		allowedUsers: map[int64]bool{authorizedUserID: true},
+		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(),
+	}
+
+	// Create a conversation state for the user
+	bot.states[authorizedUserID] = &ConversationState{
+		Command: "read",
+		Step:    1,
+		Data:    make(map[string]interface{}),
+	}
+
+	// Send callback query from authorized user
+	query := &models.CallbackQuery{
+		ID:   "callback123",
+		From: models.User{ID: authorizedUserID, Username: "authorized_user"},
+		Data: "date:today",
+		Message: models.MaybeInaccessibleMessage{
+			Message: &models.Message{
+				Chat: models.Chat{ID: 456},
+			},
+		},
+	}
+
+	// handleCallbackQuery should process this without error
+	bot.handleCallbackQuery(ctx, query)
+
+	// Verify state still exists (callback was processed)
+	if _, exists := bot.states[authorizedUserID]; !exists {
+		t.Error("Expected conversation state to still exist after authorized callback")
+	}
+}
+
+func TestBot_UnauthorizedUserCannotSendCallbackQueries(t *testing.T) {
+	// Test that unauthorized users cannot send callback queries
+	db := stubs.NewMockDB()
+	ctx := context.Background()
+	if err := db.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	authorizedUserID := int64(123)
+	unauthorizedUserID := int64(999)
+
+	bot := &Bot{
+		api:          nil,
+		db:           db,
+		allowedUsers: map[int64]bool{authorizedUserID: true},
+		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(),
+	}
+
+	// Create a conversation state (simulating a scenario where state exists)
+	bot.states[unauthorizedUserID] = &ConversationState{
+		Command: "read",
+		Step:    1,
+		Data:    make(map[string]interface{}),
+	}
+
+	// Send callback query from unauthorized user
+	query := &models.CallbackQuery{
+		ID:   "callback456",
+		From: models.User{ID: unauthorizedUserID, Username: "unauthorized_user"},
+		Data: "date:today",
+		Message: models.MaybeInaccessibleMessage{
+			Message: &models.Message{
+				Chat: models.Chat{ID: 456},
+			},
+		},
+	}
+
+	// handleCallbackQuery should reject this
+	bot.handleCallbackQuery(ctx, query)
+
+	// Verify state still exists (callback was rejected before processing)
+	// The state should remain untouched since the callback was rejected
+	state, exists := bot.states[unauthorizedUserID]
+	if !exists {
+		t.Fatal("Expected state to still exist")
+	}
+	if state.Step != 1 {
+		t.Error("Expected state to be unchanged after unauthorized callback")
+	}
+}
+
+func TestBot_MultipleAuthorizedUsers(t *testing.T) {
+	// Test that multiple authorized users can use the bot
+	db := stubs.NewMockDB()
+	ctx := context.Background()
+	if err := db.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	user1 := int64(111)
+	user2 := int64(222)
+	user3 := int64(333)
+	unauthorizedUser := int64(999)
+
+	bot := &Bot{
+		api:          nil,
+		db:           db,
+		allowedUsers: map[int64]bool{user1: true, user2: true, user3: true},
+		states:       make(map[int64]*ConversationState),
+		logger:       zap.NewNop(),
+	}
+
+	chatID := int64(456)
+
+	// User 1 sends command
+	message1 := &models.Message{
+		From: &models.User{ID: user1, Username: "user1"},
+		Chat: models.Chat{ID: chatID},
+		Text: "/new_book",
+	}
+	message1.Entities = []models.MessageEntity{
+		{Type: "bot_command", Offset: 0, Length: 9},
+	}
+	bot.handleMessage(ctx, message1)
+
+	// User 2 sends command
+	message2 := &models.Message{
+		From: &models.User{ID: user2, Username: "user2"},
+		Chat: models.Chat{ID: chatID},
+		Text: "/new_book",
+	}
+	message2.Entities = []models.MessageEntity{
+		{Type: "bot_command", Offset: 0, Length: 9},
+	}
+	bot.handleMessage(ctx, message2)
+
+	// User 3 sends command
+	message3 := &models.Message{
+		From: &models.User{ID: user3, Username: "user3"},
+		Chat: models.Chat{ID: chatID},
+		Text: "/new_book",
+	}
+	message3.Entities = []models.MessageEntity{
+		{Type: "bot_command", Offset: 0, Length: 9},
+	}
+	bot.handleMessage(ctx, message3)
+
+	// Unauthorized user sends command
+	messageUnauth := &models.Message{
+		From: &models.User{ID: unauthorizedUser, Username: "hacker"},
+		Chat: models.Chat{ID: chatID},
+		Text: "/start",
+	}
+	messageUnauth.Entities = []models.MessageEntity{
+		{Type: "bot_command", Offset: 0, Length: 6},
+	}
+	bot.handleMessage(ctx, messageUnauth)
+
+	// Verify all authorized users have states
+	if _, exists := bot.states[user1]; !exists {
+		t.Error("Expected user1 to have conversation state")
+	}
+	if _, exists := bot.states[user2]; !exists {
+		t.Error("Expected user2 to have conversation state")
+	}
+	if _, exists := bot.states[user3]; !exists {
+		t.Error("Expected user3 to have conversation state")
+	}
+
+	// Verify unauthorized user does NOT have state
+	if _, exists := bot.states[unauthorizedUser]; exists {
+		t.Error("Expected unauthorized user to NOT have conversation state")
+	}
+}
