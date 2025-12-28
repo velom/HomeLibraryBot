@@ -26,6 +26,17 @@ func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 
 	userID := message.From.ID
 
+	// Check if user is authorized
+	if !b.allowedUsers[userID] {
+		b.logger.Warn("Unauthorized access attempt",
+			zap.Int64("user_id", userID),
+			zap.Int64("chat_id", message.Chat.ID),
+			zap.String("username", message.From.Username),
+		)
+		b.sendMessageInThread(ctx, message.Chat.ID, "You are not authorized to use this bot.", message.MessageThreadID)
+		return
+	}
+
 	isCommand := len(message.Entities) > 0 && message.Entities[0].Type == models.MessageEntityTypeBotCommand && message.Entities[0].Offset == 0
 
 	b.logger.Debug("Received message",
@@ -120,6 +131,16 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 	}()
 
 	userID := query.From.ID
+
+	// Check if user is authorized
+	if !b.allowedUsers[userID] {
+		b.logger.Warn("Unauthorized callback query attempt",
+			zap.Int64("user_id", userID),
+			zap.String("username", query.From.Username),
+			zap.String("callback_data", query.Data),
+		)
+		return
+	}
 
 	b.logger.Debug("Received callback query",
 		zap.Int64("user_id", userID),
