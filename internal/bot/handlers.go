@@ -106,7 +106,9 @@ func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 		case "stats":
 			b.handleStatsStart(ctx, message)
 		case "rare":
-			b.handleRare(ctx, message)
+			b.handleRareStart(ctx, message)
+		case "add_label":
+			b.handleAddLabelStart(ctx, message)
 		default:
 			b.logger.Warn("Unknown command",
 				zap.String("command", cmdText),
@@ -177,6 +179,10 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 		b.handleStatsPeriodCallback(ctx, query, state)
 	} else if strings.HasPrefix(data, "stats_participant:") {
 		b.handleStatsParticipantCallback(ctx, query, state)
+	} else if strings.HasPrefix(data, "rare_label:") {
+		b.handleRareLabelCallback(ctx, query, state)
+	} else if strings.HasPrefix(data, "addlabel_book:") {
+		b.handleAddLabelBookCallback(ctx, query, state)
 	} else {
 		b.logger.Warn("Unknown callback prefix",
 			zap.String("callback_data", data),

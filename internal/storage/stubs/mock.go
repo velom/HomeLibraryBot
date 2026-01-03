@@ -66,6 +66,7 @@ func (m *MockDB) Initialize(ctx context.Context) error {
 		m.books[bookName] = models.Book{
 			Name:       bookName,
 			IsReadable: true,
+			Labels:     []string{},
 		}
 	}
 
@@ -80,6 +81,7 @@ func (m *MockDB) CreateBook(ctx context.Context, name string) (string, error) {
 	m.books[name] = models.Book{
 		Name:       name,
 		IsReadable: true,
+		Labels:     []string{},
 	}
 	return name, nil
 }
@@ -102,6 +104,87 @@ func (m *MockDB) ListReadableBooks(ctx context.Context) ([]models.Book, error) {
 	})
 
 	return books, nil
+}
+
+// AddLabelToBook adds a label to a book's labels array
+func (m *MockDB) AddLabelToBook(ctx context.Context, bookName string, label string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	book, exists := m.books[bookName]
+	if !exists {
+		return nil // Book not found, silently ignore
+	}
+
+	// Check if label already exists
+	for _, existingLabel := range book.Labels {
+		if existingLabel == label {
+			return nil // Label already exists
+		}
+	}
+
+	// Add label
+	book.Labels = append(book.Labels, label)
+	m.books[bookName] = book
+
+	return nil
+}
+
+// GetBooksWithoutLabel returns books that don't have the specified label
+func (m *MockDB) GetBooksWithoutLabel(ctx context.Context, label string) ([]models.Book, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var books []models.Book
+	for _, book := range m.books {
+		if !book.IsReadable {
+			continue
+		}
+
+		// Check if book has the label
+		hasLabel := false
+		for _, bookLabel := range book.Labels {
+			if bookLabel == label {
+				hasLabel = true
+				break
+			}
+		}
+
+		// Add book if it doesn't have the label
+		if !hasLabel {
+			books = append(books, book)
+		}
+	}
+
+	// Sort by name
+	sort.Slice(books, func(i, j int) bool {
+		return books[i].Name < books[j].Name
+	})
+
+	return books, nil
+}
+
+// GetAllLabels returns all unique labels across all books
+func (m *MockDB) GetAllLabels(ctx context.Context) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	labelSet := make(map[string]bool)
+	for _, book := range m.books {
+		for _, label := range book.Labels {
+			labelSet[label] = true
+		}
+	}
+
+	var labels []string
+	for label := range labelSet {
+		labels = append(labels, label)
+	}
+
+	// Sort alphabetically
+	sort.Strings(labels)
+
+	return labels, nil
 }
 
 // ListParticipants returns all participants
@@ -216,8 +299,9 @@ func (m *MockDB) GetTopBooks(ctx context.Context, limit int, startDate, endDate 
 // GetRarelyReadBooks returns books ordered by how long ago they were last read
 // If childrenOnly is true, only considers reads by children (IsParent=false)
 // If childrenOnly is false, considers reads by all participants
+// If label is not empty, only returns books with that label
 // Books never read are included with DaysSinceLastRead=-1
-func (m *MockDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool) ([]models.RareBookStat, error) {
+func (m *MockDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool, label string) ([]models.RareBookStat, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -247,6 +331,20 @@ func (m *MockDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly
 	for _, book := range m.books {
 		if !book.IsReadable {
 			continue
+		}
+
+		// Filter by label if specified
+		if label != "" {
+			hasLabel := false
+			for _, bookLabel := range book.Labels {
+				if bookLabel == label {
+					hasLabel = true
+					break
+				}
+			}
+			if !hasLabel {
+				continue
+			}
 		}
 
 		var stat models.RareBookStat

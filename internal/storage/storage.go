@@ -12,6 +12,9 @@ type Storage interface {
 	// Book operations
 	CreateBook(ctx context.Context, name string) (string, error)
 	ListReadableBooks(ctx context.Context) ([]models.Book, error)
+	AddLabelToBook(ctx context.Context, bookName string, label string) error
+	GetBooksWithoutLabel(ctx context.Context, label string) ([]models.Book, error)
+	GetAllLabels(ctx context.Context) ([]string, error)
 
 	// Participant operations
 	ListParticipants(ctx context.Context) ([]models.Participant, error)
@@ -30,8 +33,9 @@ type Storage interface {
 	// GetRarelyReadBooks returns books ordered by how long ago they were last read
 	// If childrenOnly is true, only considers reads by children (IsParent=false)
 	// If childrenOnly is false, considers reads by all participants
+	// If label is not empty, only returns books with that label
 	// Books never read are included with DaysSinceLastRead=-1
-	GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool) ([]models.RareBookStat, error)
+	GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool, label string) ([]models.RareBookStat, error)
 
 	// Lifecycle
 	Initialize(ctx context.Context) error

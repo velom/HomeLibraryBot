@@ -17,13 +17,15 @@ func runMigrations(ctx context.Context, db *ClickHouseDB) error {
 	_ = db.conn.Exec(ctx, "DROP TABLE IF EXISTS participants")
 	_ = db.conn.Exec(ctx, "DROP TABLE IF EXISTS books")
 
-	// Create books table
+	// Create books table with settings required for lightweight UPDATE support (ClickHouse 25.8+)
 	err := db.conn.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS books (
 			name String,
-			is_readable Bool
+			is_readable Bool,
+			labels Array(String)
 		) ENGINE = MergeTree()
 		ORDER BY name
+		SETTINGS enable_block_number_column = 1, enable_block_offset_column = 1
 	`)
 	if err != nil {
 		return err
@@ -57,11 +59,11 @@ func runMigrations(ctx context.Context, db *ClickHouseDB) error {
 func setupTestDB(t *testing.T) (*ClickHouseDB, func()) {
 	ctx := context.Background()
 
-	// Start ClickHouse container
+	// Start ClickHouse container (25.8+ required for lightweight UPDATE)
 	clickhouseContainer, err := clickhouseTC.Run(ctx,
-		"clickhouse/clickhouse-server:24.3.3.102-alpine",
+		"clickhouse/clickhouse-server:25.8-alpine",
 		clickhouseTC.WithUsername("default"),
-		clickhouseTC.WithPassword(""),
+		clickhouseTC.WithPassword("clickhouse"),
 		clickhouseTC.WithDatabase("default"),
 	)
 	require.NoError(t, err, "Failed to start ClickHouse container")
@@ -74,7 +76,7 @@ func setupTestDB(t *testing.T) (*ClickHouseDB, func()) {
 	require.NoError(t, err)
 
 	// Create database connection
-	db, err := NewClickHouseDB(host, port.Int(), "default", "default", "", false)
+	db, err := NewClickHouseDB(host, port.Int(), "default", "default", "clickhouse", false)
 	require.NoError(t, err, "Failed to connect to ClickHouse")
 
 	// Run migrations manually (goose doesn't work well with ClickHouse)
@@ -437,7 +439,7 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 	// Book E - never read
 
 	t.Run("Children only - includes books never read by children", func(t *testing.T) {
-		stats, err := db.GetRarelyReadBooks(ctx, 10, true)
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "")
 		require.NoError(t, err)
 		require.Len(t, stats, 5)
 
@@ -460,7 +462,7 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 	})
 
 	t.Run("All participants - includes all reads", func(t *testing.T) {
-		stats, err := db.GetRarelyReadBooks(ctx, 10, false)
+		stats, err := db.GetRarelyReadBooks(ctx, 10, false, "")
 		require.NoError(t, err)
 		require.Len(t, stats, 5)
 
@@ -484,7 +486,7 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 	})
 
 	t.Run("Limit results", func(t *testing.T) {
-		stats, err := db.GetRarelyReadBooks(ctx, 3, false)
+		stats, err := db.GetRarelyReadBooks(ctx, 3, false, "")
 		require.NoError(t, err)
 		assert.Len(t, stats, 3)
 	})
@@ -494,7 +496,7 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 		dbEmpty, cleanupEmpty := setupTestDB(t)
 		defer cleanupEmpty()
 
-		stats, err := dbEmpty.GetRarelyReadBooks(ctx, 10, false)
+		stats, err := dbEmpty.GetRarelyReadBooks(ctx, 10, false, "")
 		require.NoError(t, err)
 		assert.Empty(t, stats)
 	})
@@ -509,7 +511,7 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 		_, err = dbNoEvents.CreateBook(ctx, "Never Read 2")
 		require.NoError(t, err)
 
-		stats, err := dbNoEvents.GetRarelyReadBooks(ctx, 10, false)
+		stats, err := dbNoEvents.GetRarelyReadBooks(ctx, 10, false, "")
 		require.NoError(t, err)
 		require.Len(t, stats, 2)
 
@@ -518,6 +520,198 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 			assert.Equal(t, -1, stat.DaysSinceLastRead)
 			assert.Nil(t, stat.LastReadDate)
 		}
+	})
+}
+
+// TestClickHouseDB_AddLabelToBook tests adding labels to books
+func TestClickHouseDB_AddLabelToBook(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a book
+	_, err := db.CreateBook(ctx, "Test Book")
+	require.NoError(t, err)
+
+	// Add first label
+	err = db.AddLabelToBook(ctx, "Test Book", "fiction")
+	require.NoError(t, err)
+
+	// Verify label was added
+	books, err := db.ListReadableBooks(ctx)
+	require.NoError(t, err)
+	require.Len(t, books, 1)
+	assert.Contains(t, books[0].Labels, "fiction")
+
+	// Add second label
+	err = db.AddLabelToBook(ctx, "Test Book", "kids")
+	require.NoError(t, err)
+
+	// Verify both labels exist
+	books, err = db.ListReadableBooks(ctx)
+	require.NoError(t, err)
+	require.Len(t, books, 1)
+	assert.Contains(t, books[0].Labels, "fiction")
+	assert.Contains(t, books[0].Labels, "kids")
+	assert.Len(t, books[0].Labels, 2)
+
+	// Adding duplicate label should not create duplicate
+	err = db.AddLabelToBook(ctx, "Test Book", "fiction")
+	require.NoError(t, err)
+
+	books, err = db.ListReadableBooks(ctx)
+	require.NoError(t, err)
+	require.Len(t, books, 1)
+	assert.Len(t, books[0].Labels, 2) // Still only 2 labels
+}
+
+// TestClickHouseDB_GetBooksWithoutLabel tests filtering books without a label
+func TestClickHouseDB_GetBooksWithoutLabel(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create books
+	_, err := db.CreateBook(ctx, "Book A")
+	require.NoError(t, err)
+	_, err = db.CreateBook(ctx, "Book B")
+	require.NoError(t, err)
+	_, err = db.CreateBook(ctx, "Book C")
+	require.NoError(t, err)
+
+	// Add labels
+	err = db.AddLabelToBook(ctx, "Book A", "fiction")
+	require.NoError(t, err)
+	err = db.AddLabelToBook(ctx, "Book B", "fiction")
+	require.NoError(t, err)
+	err = db.AddLabelToBook(ctx, "Book B", "kids")
+	require.NoError(t, err)
+	// Book C has no labels
+
+	// Get books without "fiction" label
+	books, err := db.GetBooksWithoutLabel(ctx, "fiction")
+	require.NoError(t, err)
+	require.Len(t, books, 1)
+	assert.Equal(t, "Book C", books[0].Name)
+
+	// Get books without "kids" label
+	books, err = db.GetBooksWithoutLabel(ctx, "kids")
+	require.NoError(t, err)
+	require.Len(t, books, 2)
+	assert.Equal(t, "Book A", books[0].Name)
+	assert.Equal(t, "Book C", books[1].Name)
+
+	// Get books without non-existent label (should return all)
+	books, err = db.GetBooksWithoutLabel(ctx, "nonexistent")
+	require.NoError(t, err)
+	assert.Len(t, books, 3)
+}
+
+// TestClickHouseDB_GetAllLabels tests retrieving all unique labels
+func TestClickHouseDB_GetAllLabels(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Initially no labels
+	labels, err := db.GetAllLabels(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, labels)
+
+	// Create books and add labels
+	_, err = db.CreateBook(ctx, "Book A")
+	require.NoError(t, err)
+	_, err = db.CreateBook(ctx, "Book B")
+	require.NoError(t, err)
+
+	err = db.AddLabelToBook(ctx, "Book A", "fiction")
+	require.NoError(t, err)
+	err = db.AddLabelToBook(ctx, "Book A", "kids")
+	require.NoError(t, err)
+	err = db.AddLabelToBook(ctx, "Book B", "kids")
+	require.NoError(t, err)
+	err = db.AddLabelToBook(ctx, "Book B", "adventure")
+	require.NoError(t, err)
+
+	// Get all labels
+	labels, err = db.GetAllLabels(ctx)
+	require.NoError(t, err)
+	require.Len(t, labels, 3)
+
+	// Should be sorted alphabetically
+	assert.Equal(t, "adventure", labels[0])
+	assert.Equal(t, "fiction", labels[1])
+	assert.Equal(t, "kids", labels[2])
+}
+
+// TestClickHouseDB_GetRarelyReadBooks_WithLabel tests filtering rare books by label
+func TestClickHouseDB_GetRarelyReadBooks_WithLabel(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Setup test data
+	books := []string{"Book A", "Book B", "Book C", "Book D"}
+	for _, book := range books {
+		_, err := db.CreateBook(ctx, book)
+		require.NoError(t, err)
+	}
+
+	// Add labels
+	err := db.AddLabelToBook(ctx, "Book A", "fiction")
+	require.NoError(t, err)
+	err = db.AddLabelToBook(ctx, "Book B", "fiction")
+	require.NoError(t, err)
+	err = db.AddLabelToBook(ctx, "Book C", "kids")
+	require.NoError(t, err)
+	// Book D has no labels
+
+	// Add participants
+	err = db.conn.Exec(ctx, `INSERT INTO participants (name, is_parent) VALUES (?, ?)`, "Alice", false)
+	require.NoError(t, err)
+
+	// Create events
+	now := time.Now().UTC()
+	err = db.CreateEvent(ctx, now.AddDate(0, 0, -30), "Book A", "Alice")
+	require.NoError(t, err)
+	err = db.CreateEvent(ctx, now.AddDate(0, 0, -10), "Book B", "Alice")
+	require.NoError(t, err)
+	err = db.CreateEvent(ctx, now.AddDate(0, 0, -20), "Book C", "Alice")
+	require.NoError(t, err)
+	// Book D never read
+
+	t.Run("Filter by fiction label", func(t *testing.T) {
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "fiction")
+		require.NoError(t, err)
+		require.Len(t, stats, 2)
+
+		// Book A (30 days) should be first
+		assert.Equal(t, "Book A", stats[0].BookName)
+		assert.GreaterOrEqual(t, stats[0].DaysSinceLastRead, 29)
+
+		// Book B (10 days) should be second
+		assert.Equal(t, "Book B", stats[1].BookName)
+		assert.GreaterOrEqual(t, stats[1].DaysSinceLastRead, 9)
+	})
+
+	t.Run("Filter by kids label", func(t *testing.T) {
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "kids")
+		require.NoError(t, err)
+		require.Len(t, stats, 1)
+
+		// Only Book C has kids label
+		assert.Equal(t, "Book C", stats[0].BookName)
+		assert.GreaterOrEqual(t, stats[0].DaysSinceLastRead, 19)
+	})
+
+	t.Run("Filter by non-existent label", func(t *testing.T) {
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "nonexistent")
+		require.NoError(t, err)
+		assert.Empty(t, stats)
 	})
 }
 

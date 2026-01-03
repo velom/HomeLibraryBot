@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	libmodels "library/internal/models"
+
 	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
 )
@@ -299,4 +301,123 @@ func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, star
 	}
 
 	b.sendMessageInThread(ctx, chatID, text.String(), messageThreadID)
+}
+
+// handleRareLabelCallback processes label selection for rare books command
+func (b *Bot) handleRareLabelCallback(ctx context.Context, query *models.CallbackQuery, state *ConversationState) {
+	label := strings.TrimPrefix(query.Data, "rare_label:")
+	const limit = 10
+
+	// Get rarely read books by children
+	childrenStats, err := b.db.GetRarelyReadBooks(ctx, limit, true, label)
+	if err != nil {
+		b.logger.Error("Failed to get rarely read books by children",
+			zap.Error(err),
+			zap.Int64("user_id", query.From.ID),
+		)
+		b.sendMessageInThread(ctx, getChatIDFromQuery(query), fmt.Sprintf("Error: %v", err), state.MessageThreadID)
+		state.Step = -1
+		return
+	}
+
+	// Get rarely read books by all participants
+	allStats, err := b.db.GetRarelyReadBooks(ctx, limit, false, label)
+	if err != nil {
+		b.logger.Error("Failed to get rarely read books by all",
+			zap.Error(err),
+			zap.Int64("user_id", query.From.ID),
+		)
+		b.sendMessageInThread(ctx, getChatIDFromQuery(query), fmt.Sprintf("Error: %v", err), state.MessageThreadID)
+		state.Step = -1
+		return
+	}
+
+	var text strings.Builder
+	text.WriteString("📚 Rarely read books")
+	if label != "" {
+		text.WriteString(fmt.Sprintf(" (label: %s)", label))
+	}
+	text.WriteString(":\n\n")
+
+	// Children's perspective
+	text.WriteString("👶 By children's choice:\n")
+	if len(childrenStats) == 0 {
+		text.WriteString("No data available\n")
+	} else {
+		for i, stat := range childrenStats {
+			text.WriteString(fmt.Sprintf("%d. %s", i+1, stat.BookName))
+			if stat.DaysSinceLastRead == -1 {
+				text.WriteString(" (never read)")
+			} else {
+				lastReadStr := stat.LastReadDate.Format("2006-01-02")
+				text.WriteString(fmt.Sprintf(" (%d days ago, last: %s)", stat.DaysSinceLastRead, lastReadStr))
+			}
+			text.WriteString("\n")
+		}
+	}
+
+	text.WriteString("\n📖 Overall (all participants):\n")
+	if len(allStats) == 0 {
+		text.WriteString("No data available\n")
+	} else {
+		for i, stat := range allStats {
+			text.WriteString(fmt.Sprintf("%d. %s", i+1, stat.BookName))
+			if stat.DaysSinceLastRead == -1 {
+				text.WriteString(" (never read)")
+			} else {
+				lastReadStr := stat.LastReadDate.Format("2006-01-02")
+				text.WriteString(fmt.Sprintf(" (%d days ago, last: %s)", stat.DaysSinceLastRead, lastReadStr))
+			}
+			text.WriteString("\n")
+		}
+	}
+
+	b.sendMessageInThread(ctx, getChatIDFromQuery(query), text.String(), state.MessageThreadID)
+	state.Step = -1 // Mark conversation as complete
+}
+
+// handleAddLabelBookCallback processes book selection for add label command
+func (b *Bot) handleAddLabelBookCallback(ctx context.Context, query *models.CallbackQuery, state *ConversationState) {
+	indexStr := strings.TrimPrefix(query.Data, "addlabel_book:")
+	bookIdx, err := strconv.Atoi(indexStr)
+	if err != nil {
+		return
+	}
+
+	// Get books from state
+	booksInterface, ok := state.Data["books"]
+	if !ok {
+		b.sendMessageInThread(ctx, getChatIDFromQuery(query), "Error: Book list not found", state.MessageThreadID)
+		state.Step = -1
+		return
+	}
+
+	books, ok := booksInterface.([]libmodels.Book)
+	if !ok || bookIdx < 0 || bookIdx >= len(books) {
+		b.sendMessageInThread(ctx, getChatIDFromQuery(query), "Error: Invalid book selection", state.MessageThreadID)
+		state.Step = -1
+		return
+	}
+
+	selectedBook := books[bookIdx]
+	label := state.Data["label"].(string)
+
+	// Add label to book
+	err = b.db.AddLabelToBook(ctx, selectedBook.Name, label)
+	if err != nil {
+		b.logger.Error("Failed to add label to book",
+			zap.Error(err),
+			zap.Int64("user_id", query.From.ID),
+			zap.String("book", selectedBook.Name),
+			zap.String("label", label),
+		)
+		b.sendMessageInThread(ctx, getChatIDFromQuery(query), fmt.Sprintf("Error: %v", err), state.MessageThreadID)
+		state.Step = -1
+		return
+	}
+
+	b.sendMessageInThread(ctx, getChatIDFromQuery(query),
+		fmt.Sprintf("✅ Label '%s' added to book '%s'", label, selectedBook.Name),
+		state.MessageThreadID)
+	state.Step = -1 // Mark conversation as complete
 }
