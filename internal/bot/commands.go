@@ -19,7 +19,8 @@ Available commands:
 /who_is_next - See who should read next
 /last - Show last 10 reading events
 /stats - View reading statistics
-/rare - Show rarely read books`
+/rare - Show rarely read books
+/add_label - Add a label to a book`
 
 	b.sendMessageInThread(ctx, message.Chat.ID, text, message.MessageThreadID)
 }
@@ -206,67 +207,67 @@ func (b *Bot) handleStatsStart(ctx context.Context, message *models.Message) {
 	b.sendMessageInThreadWithMarkup(ctx, message.Chat.ID, "📊 Select time period for statistics:", message.MessageThreadID, keyboard)
 }
 
-// handleRare shows rarely read books in two categories: by children and by all participants
-func (b *Bot) handleRare(ctx context.Context, message *models.Message) {
-	const limit = 10
+// handleRareStart starts the rare books command with label selection
+func (b *Bot) handleRareStart(ctx context.Context, message *models.Message) {
+	userID := message.From.ID
 
-	// Get rarely read books by children
-	childrenStats, err := b.db.GetRarelyReadBooks(ctx, limit, true)
+	// Get all available labels
+	labels, err := b.db.GetAllLabels(ctx)
 	if err != nil {
-		b.logger.Error("Failed to get rarely read books by children",
+		b.logger.Error("Failed to get labels",
 			zap.Error(err),
-			zap.Int64("user_id", message.From.ID),
+			zap.Int64("user_id", userID),
 		)
 		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
 		return
 	}
 
-	// Get rarely read books by all participants
-	allStats, err := b.db.GetRarelyReadBooks(ctx, limit, false)
-	if err != nil {
-		b.logger.Error("Failed to get rarely read books by all",
-			zap.Error(err),
-			zap.Int64("user_id", message.From.ID),
-		)
-		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
-		return
+	// Set conversation state
+	b.statesMu.Lock()
+	b.states[userID] = &ConversationState{
+		Command:         "rare",
+		Step:            1,
+		Data:            make(map[string]interface{}),
+		MessageThreadID: message.MessageThreadID,
+	}
+	b.statesMu.Unlock()
+
+	// Build keyboard with "All books" option and available labels
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "📚 All books", CallbackData: "rare_label:"},
+			},
+		},
 	}
 
-	var text strings.Builder
-	text.WriteString("📚 Rarely read books:\n\n")
-
-	// Children's perspective
-	text.WriteString("👶 By children's choice:\n")
-	if len(childrenStats) == 0 {
-		text.WriteString("No data available\n")
-	} else {
-		for i, stat := range childrenStats {
-			text.WriteString(fmt.Sprintf("%d. %s", i+1, stat.BookName))
-			if stat.DaysSinceLastRead == -1 {
-				text.WriteString(" (never read)")
-			} else {
-				lastReadStr := stat.LastReadDate.Format("2006-01-02")
-				text.WriteString(fmt.Sprintf(" (%d days ago, last: %s)", stat.DaysSinceLastRead, lastReadStr))
-			}
-			text.WriteString("\n")
+	// Add labels in two columns
+	for i := 0; i < len(labels); i += 2 {
+		row := []models.InlineKeyboardButton{
+			{Text: labels[i], CallbackData: fmt.Sprintf("rare_label:%s", labels[i])},
 		}
-	}
-
-	text.WriteString("\n📖 Overall (all participants):\n")
-	if len(allStats) == 0 {
-		text.WriteString("No data available\n")
-	} else {
-		for i, stat := range allStats {
-			text.WriteString(fmt.Sprintf("%d. %s", i+1, stat.BookName))
-			if stat.DaysSinceLastRead == -1 {
-				text.WriteString(" (never read)")
-			} else {
-				lastReadStr := stat.LastReadDate.Format("2006-01-02")
-				text.WriteString(fmt.Sprintf(" (%d days ago, last: %s)", stat.DaysSinceLastRead, lastReadStr))
-			}
-			text.WriteString("\n")
+		if i+1 < len(labels) {
+			row = append(row, models.InlineKeyboardButton{Text: labels[i+1], CallbackData: fmt.Sprintf("rare_label:%s", labels[i+1])})
 		}
+		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, row)
 	}
 
-	b.sendMessageInThread(ctx, message.Chat.ID, text.String(), message.MessageThreadID)
+	b.sendMessageInThreadWithMarkup(ctx, message.Chat.ID, "🏷 Filter by label:", message.MessageThreadID, keyboard)
+}
+
+// handleAddLabelStart starts the add label command
+func (b *Bot) handleAddLabelStart(ctx context.Context, message *models.Message) {
+	userID := message.From.ID
+
+	// Set conversation state
+	b.statesMu.Lock()
+	b.states[userID] = &ConversationState{
+		Command:         "add_label",
+		Step:            1,
+		Data:            make(map[string]interface{}),
+		MessageThreadID: message.MessageThreadID,
+	}
+	b.statesMu.Unlock()
+
+	b.sendMessageInThread(ctx, message.Chat.ID, "🏷 Which label?", message.MessageThreadID)
 }

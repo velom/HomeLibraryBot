@@ -86,6 +86,11 @@ The `cmd/migrate` binary reads database credentials from `.env` file and runs mi
 
 ### Migration Best Practices
 
+**CRITICAL: NEVER run migrations manually outside of tests.**
+- Only run migrations in automated tests
+- Let the user run migrations themselves using `make run-migrations`
+- You can create migration files and write the SQL, but DO NOT execute them
+
 **IMPORTANT: NEVER edit existing migration files that have been committed or run in any environment.**
 
 Instead of editing existing migrations:

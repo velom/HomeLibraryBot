@@ -4,8 +4,9 @@ import "time"
 
 // Book represents a book in the library
 type Book struct {
-	Name       string `json:"name"`
-	IsReadable bool   `json:"isReadable"`
+	Name       string   `json:"name"`
+	IsReadable bool     `json:"isReadable"`
+	Labels     []string `json:"labels"`
 }
 
 // Participant represents a family member

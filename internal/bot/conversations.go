@@ -21,6 +21,8 @@ func (b *Bot) handleConversation(ctx context.Context, message *models.Message, s
 		b.handleReadConversation(ctx, message, state)
 	case "stats":
 		b.handleStatsConversation(ctx, message, state)
+	case "add_label":
+		b.handleAddLabelConversation(ctx, message, state)
 	}
 
 	// Clean up completed conversations
@@ -236,5 +238,60 @@ func (b *Bot) handleStatsConversation(ctx context.Context, message *models.Messa
 			b.showParticipantSelectionForStats(ctx, message.Chat.ID, state.MessageThreadID)
 			return
 		}
+	}
+}
+
+// handleAddLabelConversation handles the add label multi-step process
+func (b *Bot) handleAddLabelConversation(ctx context.Context, message *models.Message, state *ConversationState) {
+	switch state.Step {
+	case 1: // Waiting for label name
+		label := strings.TrimSpace(message.Text)
+		if label == "" {
+			b.sendMessageInThread(ctx, message.Chat.ID, "Label cannot be empty. Please enter a label:", state.MessageThreadID)
+			return
+		}
+
+		// Store label in state
+		state.Data["label"] = label
+		state.Step = 2
+
+		// Get books without this label
+		books, err := b.db.GetBooksWithoutLabel(ctx, label)
+		if err != nil {
+			b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), state.MessageThreadID)
+			state.Step = -1
+			return
+		}
+
+		if len(books) == 0 {
+			b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("No books without label '%s' found.", label), state.MessageThreadID)
+			state.Step = -1
+			return
+		}
+
+		// Store books in state for later use
+		state.Data["books"] = books
+
+		// Create inline keyboard for book selection (2 columns)
+		var rows [][]models.InlineKeyboardButton
+		var currentRow []models.InlineKeyboardButton
+		for i, book := range books {
+			button := models.InlineKeyboardButton{
+				Text:         book.Name,
+				CallbackData: fmt.Sprintf("addlabel_book:%d", i),
+			}
+			currentRow = append(currentRow, button)
+
+			// Add row when we have 2 buttons or it's the last book
+			if len(currentRow) == 2 || i == len(books)-1 {
+				rows = append(rows, currentRow)
+				currentRow = []models.InlineKeyboardButton{}
+			}
+		}
+
+		keyboard := &models.InlineKeyboardMarkup{
+			InlineKeyboard: rows,
+		}
+		b.sendMessageInThreadWithMarkup(ctx, message.Chat.ID, "📚 Select a book:", state.MessageThreadID, keyboard)
 	}
 }

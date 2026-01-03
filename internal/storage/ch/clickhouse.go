@@ -68,7 +68,7 @@ func (db *ClickHouseDB) CreateBook(ctx context.Context, name string) (string, er
 
 // ListReadableBooks returns all books that are available to read
 func (db *ClickHouseDB) ListReadableBooks(ctx context.Context) ([]models.Book, error) {
-	rows, err := db.conn.Query(ctx, `SELECT name, is_readable FROM books WHERE is_readable = true ORDER BY name`)
+	rows, err := db.conn.Query(ctx, `SELECT name, is_readable, labels FROM books WHERE is_readable = true ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list readable books: %w", err)
 	}
@@ -77,12 +77,73 @@ func (db *ClickHouseDB) ListReadableBooks(ctx context.Context) ([]models.Book, e
 	var books []models.Book
 	for rows.Next() {
 		var book models.Book
-		if err := rows.Scan(&book.Name, &book.IsReadable); err != nil {
+		if err := rows.Scan(&book.Name, &book.IsReadable, &book.Labels); err != nil {
 			return nil, fmt.Errorf("failed to scan book: %w", err)
 		}
 		books = append(books, book)
 	}
 	return books, nil
+}
+
+// AddLabelToBook adds a label to a book's labels array
+func (db *ClickHouseDB) AddLabelToBook(ctx context.Context, bookName string, label string) error {
+	// Use lightweight UPDATE (available in ClickHouse 25+)
+	err := db.conn.Exec(ctx, `
+		UPDATE books
+		SET labels = arrayDistinct(arrayConcat(labels, [?]))
+		WHERE name = ?`,
+		label, bookName)
+	if err != nil {
+		return fmt.Errorf("failed to add label to book: %w", err)
+	}
+	return nil
+}
+
+// GetBooksWithoutLabel returns books that don't have the specified label
+func (db *ClickHouseDB) GetBooksWithoutLabel(ctx context.Context, label string) ([]models.Book, error) {
+	rows, err := db.conn.Query(ctx, `
+		SELECT name, is_readable, labels
+		FROM books
+		WHERE is_readable = true AND NOT has(labels, ?)
+		ORDER BY name`,
+		label)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get books without label: %w", err)
+	}
+	defer rows.Close()
+
+	var books []models.Book
+	for rows.Next() {
+		var book models.Book
+		if err := rows.Scan(&book.Name, &book.IsReadable, &book.Labels); err != nil {
+			return nil, fmt.Errorf("failed to scan book: %w", err)
+		}
+		books = append(books, book)
+	}
+	return books, nil
+}
+
+// GetAllLabels returns all unique labels across all books
+func (db *ClickHouseDB) GetAllLabels(ctx context.Context) ([]string, error) {
+	rows, err := db.conn.Query(ctx, `
+		SELECT DISTINCT arrayJoin(labels) as label
+		FROM books
+		WHERE length(labels) > 0
+		ORDER BY label`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all labels: %w", err)
+	}
+	defer rows.Close()
+
+	var labels []string
+	for rows.Next() {
+		var label string
+		if err := rows.Scan(&label); err != nil {
+			return nil, fmt.Errorf("failed to scan label: %w", err)
+		}
+		labels = append(labels, label)
+	}
+	return labels, nil
 }
 
 // ListParticipants returns all participants
@@ -197,52 +258,99 @@ func (db *ClickHouseDB) GetTopBooks(ctx context.Context, limit int, startDate, e
 // GetRarelyReadBooks returns books ordered by how long ago they were last read
 // If childrenOnly is true, only considers reads by children (IsParent=false)
 // If childrenOnly is false, considers reads by all participants
+// If label is not empty, only returns books with that label
 // Books never read are included with DaysSinceLastRead=-1
-func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool) ([]models.RareBookStat, error) {
+func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool, label string) ([]models.RareBookStat, error) {
 	var query string
+	var args []interface{}
 
 	if childrenOnly {
 		// Only consider reads by children
-		query = `
-			SELECT
-				b.name as book_name,
-				max(e.date) as last_read_date,
-				if(max(e.date) <= toDateTime(0), -1, dateDiff('day', max(e.date), now())) as days_since_last_read
-			FROM books b
-			LEFT JOIN (
-				SELECT e.book_name, e.date
-				FROM events e
-				INNER JOIN participants p ON e.participant_name = p.name
-				WHERE p.is_parent = false
-			) e ON b.name = e.book_name
-			WHERE b.is_readable = true
-			GROUP BY b.name
-			ORDER BY
-				(max(e.date) <= toDateTime(0)) ASC,
-				days_since_last_read DESC,
-				book_name ASC
-			LIMIT ?
-		`
+		if label != "" {
+			query = `
+				SELECT
+					b.name as book_name,
+					max(e.date) as last_read_date,
+					if(max(e.date) <= toDateTime(0), -1, dateDiff('day', max(e.date), now())) as days_since_last_read
+				FROM books b
+				LEFT JOIN (
+					SELECT e.book_name, e.date
+					FROM events e
+					INNER JOIN participants p ON e.participant_name = p.name
+					WHERE p.is_parent = false
+				) e ON b.name = e.book_name
+				WHERE b.is_readable = true AND has(b.labels, ?)
+				GROUP BY b.name
+				ORDER BY
+					(max(e.date) <= toDateTime(0)) ASC,
+					days_since_last_read DESC,
+					book_name ASC
+				LIMIT ?
+			`
+			args = []interface{}{label, limit}
+		} else {
+			query = `
+				SELECT
+					b.name as book_name,
+					max(e.date) as last_read_date,
+					if(max(e.date) <= toDateTime(0), -1, dateDiff('day', max(e.date), now())) as days_since_last_read
+				FROM books b
+				LEFT JOIN (
+					SELECT e.book_name, e.date
+					FROM events e
+					INNER JOIN participants p ON e.participant_name = p.name
+					WHERE p.is_parent = false
+				) e ON b.name = e.book_name
+				WHERE b.is_readable = true
+				GROUP BY b.name
+				ORDER BY
+					(max(e.date) <= toDateTime(0)) ASC,
+					days_since_last_read DESC,
+					book_name ASC
+				LIMIT ?
+			`
+			args = []interface{}{limit}
+		}
 	} else {
 		// Consider reads by all participants
-		query = `
-			SELECT
-				b.name as book_name,
-				max(e.date) as last_read_date,
-				if(max(e.date) <= toDateTime(0), -1, dateDiff('day', max(e.date), now())) as days_since_last_read
-			FROM books b
-			LEFT JOIN events e ON b.name = e.book_name
-			WHERE b.is_readable = true
-			GROUP BY b.name
-			ORDER BY
-				(max(e.date) <= toDateTime(0)) ASC,
-				days_since_last_read DESC,
-				book_name ASC
-			LIMIT ?
-		`
+		if label != "" {
+			query = `
+				SELECT
+					b.name as book_name,
+					max(e.date) as last_read_date,
+					if(max(e.date) <= toDateTime(0), -1, dateDiff('day', max(e.date), now())) as days_since_last_read
+				FROM books b
+				LEFT JOIN events e ON b.name = e.book_name
+				WHERE b.is_readable = true AND has(b.labels, ?)
+				GROUP BY b.name
+				ORDER BY
+					(max(e.date) <= toDateTime(0)) ASC,
+					days_since_last_read DESC,
+					book_name ASC
+				LIMIT ?
+			`
+			args = []interface{}{label, limit}
+		} else {
+			query = `
+				SELECT
+					b.name as book_name,
+					max(e.date) as last_read_date,
+					if(max(e.date) <= toDateTime(0), -1, dateDiff('day', max(e.date), now())) as days_since_last_read
+				FROM books b
+				LEFT JOIN events e ON b.name = e.book_name
+				WHERE b.is_readable = true
+				GROUP BY b.name
+				ORDER BY
+					(max(e.date) <= toDateTime(0)) ASC,
+					days_since_last_read DESC,
+					book_name ASC
+				LIMIT ?
+			`
+			args = []interface{}{limit}
+		}
 	}
 
-	rows, err := db.conn.Query(ctx, query, limit)
+	rows, err := db.conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get rarely read books: %w", err)
 	}
