@@ -19,6 +19,9 @@ type Config struct {
 	// HTTP server configuration
 	HTTPPort int // Port for Mini App HTTP server (default: 8081)
 
+	// Notification configuration
+	NotificationChatID int64 // Chat ID to send notifications when events are created via web-app (0 = disabled)
+
 	// ClickHouse configuration
 	ClickHouseHost     string
 	ClickHousePort     int
@@ -74,6 +77,16 @@ func LoadFromEnv() (*Config, error) {
 			return nil, fmt.Errorf("invalid HTTP_PORT: %w", err)
 		}
 		config.HTTPPort = port
+	}
+
+	// Notification chat ID (optional)
+	notificationChatIDStr := os.Getenv("NOTIFICATION_CHAT_ID")
+	if notificationChatIDStr != "" {
+		chatID, err := strconv.ParseInt(notificationChatIDStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid NOTIFICATION_CHAT_ID: %w", err)
+		}
+		config.NotificationChatID = chatID
 	}
 
 	// Use Mock DB (default: false)

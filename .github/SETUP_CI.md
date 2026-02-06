@@ -124,6 +124,12 @@ Go to your GitHub repository and add these secrets:
 | `CLICKHOUSE_PASSWORD` | Database password | *(empty)* |
 | `CLICKHOUSE_USE_TLS` | Use TLS connection | `false` |
 
+### Optional Secrets (Notifications)
+
+| Secret Name | Description | Default |
+|-------------|-------------|---------|
+| `NOTIFICATION_CHAT_ID` | Telegram chat ID for event notifications from web-app | *(disabled)* |
+
 ### How to Add Secrets
 
 1. **GCP_SA_KEY:**
@@ -142,6 +148,12 @@ Go to your GitHub repository and add these secrets:
 3. **ALLOWED_USER_IDS:**
    - Get your Telegram user ID from [@userinfobot](https://t.me/userinfobot)
    - Add multiple IDs separated by commas: `123456789,987654321`
+
+4. **NOTIFICATION_CHAT_ID** (optional):
+   - For private chats: use your user ID (same as above)
+   - For groups: add the bot to the group, then use [@getidsbot](https://t.me/getidsbot) or forward a message from the group to [@userinfobot](https://t.me/userinfobot)
+   - Group IDs are typically negative numbers (e.g., `-1001234567890`)
+   - Leave empty to disable notifications
 
 ## Step 3: Configure Deployment Settings
 
