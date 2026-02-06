@@ -291,7 +291,7 @@ func (hs *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if hs.bot.notificationChatID != 0 {
 			notificationText := fmt.Sprintf("New reading event!\n\nDate: %s\nBook: %s\nReader: %s",
 				date.Format("2006-01-02"), req.BookName, req.ParticipantName)
-			hs.bot.sendMessageInThread(r.Context(), hs.bot.notificationChatID, notificationText, 0)
+			hs.bot.sendMessageInThread(r.Context(), hs.bot.notificationChatID, notificationText, hs.bot.notificationThreadID)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
