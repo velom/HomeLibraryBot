@@ -68,7 +68,8 @@ jobs:
             CLICKHOUSE_USE_TLS=${{ secrets.CLICKHOUSE_USE_TLS }}|\
             WEBHOOK_MODE=true|\
             WEBHOOK_URL=${{ secrets.WEBHOOK_URL }}|\
-            NOTIFICATION_CHAT_ID=${{ secrets.NOTIFICATION_CHAT_ID }}"
+            NOTIFICATION_CHAT_ID=${{ secrets.NOTIFICATION_CHAT_ID }}|\
+            NOTIFICATION_THREAD_ID=${{ secrets.NOTIFICATION_THREAD_ID }}"
 
       - name: Deployment summary
         run: |

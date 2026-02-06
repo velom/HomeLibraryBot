@@ -129,6 +129,7 @@ Go to your GitHub repository and add these secrets:
 | Secret Name | Description | Default |
 |-------------|-------------|---------|
 | `NOTIFICATION_CHAT_ID` | Telegram chat ID for event notifications from web-app | *(disabled)* |
+| `NOTIFICATION_THREAD_ID` | Thread/topic ID for forum groups | *(general chat)* |
 
 ### How to Add Secrets
 
@@ -154,6 +155,12 @@ Go to your GitHub repository and add these secrets:
    - For groups: add the bot to the group, then use [@getidsbot](https://t.me/getidsbot) or forward a message from the group to [@userinfobot](https://t.me/userinfobot)
    - Group IDs are typically negative numbers (e.g., `-1001234567890`)
    - Leave empty to disable notifications
+
+5. **NOTIFICATION_THREAD_ID** (optional, for forum groups with topics):
+   - Only needed if your group has Topics/Forum mode enabled
+   - To get the topic ID: right-click on the topic → Copy Link → the number after the last `/` is the thread ID
+   - Example: `https://t.me/c/1234567890/42` → thread ID is `42`
+   - Leave empty to send to the general chat (no specific topic)
 
 ## Step 3: Configure Deployment Settings
 

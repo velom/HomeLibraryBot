@@ -11,7 +11,7 @@ import (
 )
 
 // NewBot creates a new Telegram bot
-func NewBot(token string, db storage.Storage, allowedUserIDs []int64, notificationChatID int64, logger *zap.Logger) (*Bot, error) {
+func NewBot(token string, db storage.Storage, allowedUserIDs []int64, notificationChatID int64, notificationThreadID int, logger *zap.Logger) (*Bot, error) {
 	allowedUsers := make(map[int64]bool)
 	for _, id := range allowedUserIDs {
 		allowedUsers[id] = true
@@ -19,11 +19,12 @@ func NewBot(token string, db storage.Storage, allowedUserIDs []int64, notificati
 
 	// Create bot wrapper first (without API)
 	botWrapper := &Bot{
-		db:                 db,
-		allowedUsers:       allowedUsers,
-		states:             make(map[int64]*ConversationState),
-		logger:             logger,
-		notificationChatID: notificationChatID,
+		db:                   db,
+		allowedUsers:         allowedUsers,
+		states:               make(map[int64]*ConversationState),
+		logger:               logger,
+		notificationChatID:   notificationChatID,
+		notificationThreadID: notificationThreadID,
 	}
 
 	// Create bot with handlers

@@ -20,7 +20,8 @@ type Config struct {
 	HTTPPort int // Port for Mini App HTTP server (default: 8081)
 
 	// Notification configuration
-	NotificationChatID int64 // Chat ID to send notifications when events are created via web-app (0 = disabled)
+	NotificationChatID    int64 // Chat ID to send notifications when events are created via web-app (0 = disabled)
+	NotificationThreadID  int   // Thread/topic ID for forum groups (0 = general/no topic)
 
 	// ClickHouse configuration
 	ClickHouseHost     string
@@ -87,6 +88,16 @@ func LoadFromEnv() (*Config, error) {
 			return nil, fmt.Errorf("invalid NOTIFICATION_CHAT_ID: %w", err)
 		}
 		config.NotificationChatID = chatID
+	}
+
+	// Notification thread/topic ID (optional, for forum groups)
+	notificationThreadIDStr := os.Getenv("NOTIFICATION_THREAD_ID")
+	if notificationThreadIDStr != "" {
+		threadID, err := strconv.Atoi(notificationThreadIDStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid NOTIFICATION_THREAD_ID: %w", err)
+		}
+		config.NotificationThreadID = threadID
 	}
 
 	// Use Mock DB (default: false)
