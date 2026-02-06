@@ -287,6 +287,13 @@ func (hs *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			zap.String("participant", req.ParticipantName),
 		)
 
+		// Send notification to configured chat
+		if hs.bot.notificationChatID != 0 {
+			notificationText := fmt.Sprintf("New reading event!\n\nDate: %s\nBook: %s\nReader: %s",
+				date.Format("2006-01-02"), req.BookName, req.ParticipantName)
+			hs.bot.sendMessageInThread(r.Context(), hs.bot.notificationChatID, notificationText, 0)
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{

@@ -10,12 +10,13 @@ import (
 
 // Bot represents the Telegram bot wrapper
 type Bot struct {
-	api          *bot.Bot
-	db           storage.Storage
-	allowedUsers map[int64]bool
-	states       map[int64]*ConversationState
-	statesMu     sync.RWMutex
-	logger       *zap.Logger
+	api                *bot.Bot
+	db                 storage.Storage
+	allowedUsers       map[int64]bool
+	states             map[int64]*ConversationState
+	statesMu           sync.RWMutex
+	logger             *zap.Logger
+	notificationChatID int64 // Chat ID to send notifications when events are created via web-app (0 = disabled)
 }
 
 // ConversationState tracks the state of multi-step commands

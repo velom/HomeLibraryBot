@@ -122,7 +122,7 @@ func (a *App) initDatabase() error {
 
 // initBot initializes the Telegram bot
 func (a *App) initBot() error {
-	telegramBot, err := bot.NewBot(a.config.TelegramToken, a.db, a.config.AllowedUserIDs, a.logger)
+	telegramBot, err := bot.NewBot(a.config.TelegramToken, a.db, a.config.AllowedUserIDs, a.config.NotificationChatID, a.logger)
 	if err != nil {
 		a.logger.Error("Failed to create Telegram bot", zap.Error(err))
 		return fmt.Errorf("failed to create Telegram bot: %w", err)
