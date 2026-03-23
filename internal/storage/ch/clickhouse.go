@@ -238,9 +238,12 @@ func (db *ClickHouseDB) GetTopBooks(ctx context.Context, limit int, startDate, e
 				AND p.is_parent = false
 			GROUP BY e.book_name
 			ORDER BY read_count DESC, e.book_name ASC
-			LIMIT ?
 		`
-		args = []interface{}{startDate, endDate, limit}
+		args = []interface{}{startDate, endDate}
+		if limit > 0 {
+			query += " LIMIT ?"
+			args = append(args, limit)
+		}
 	} else {
 		// Get stats for specific participant
 		query = `
@@ -253,9 +256,12 @@ func (db *ClickHouseDB) GetTopBooks(ctx context.Context, limit int, startDate, e
 				AND participant_name = ?
 			GROUP BY book_name
 			ORDER BY read_count DESC, book_name ASC
-			LIMIT ?
 		`
-		args = []interface{}{startDate, endDate, participantName, limit}
+		args = []interface{}{startDate, endDate, participantName}
+		if limit > 0 {
+			query += " LIMIT ?"
+			args = append(args, limit)
+		}
 	}
 
 	rows, err := db.conn.Query(ctx, query, args...)

@@ -183,6 +183,8 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 		b.handleStatsPeriodCallback(ctx, query, state)
 	} else if strings.HasPrefix(data, "stats_participant:") {
 		b.handleStatsParticipantCallback(ctx, query, state)
+	} else if strings.HasPrefix(data, "stats_mode:") {
+		b.handleStatsModeCallback(ctx, query, state)
 	} else if strings.HasPrefix(data, "rare_label:") {
 		b.handleRareLabelCallback(ctx, query, state)
 	} else if strings.HasPrefix(data, "addlabel_book:") {
