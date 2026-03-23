@@ -221,6 +221,24 @@
     </form>
 
     <script>
+        // Dev mode: provide mock Telegram SDK when running outside Telegram.
+        // Inside Telegram, initData is always a non-empty string so this never activates.
+        // If the CDN script fails to load, the shim activates but webhook-mode auth
+        // will reject the empty initData — no security bypass possible.
+        if (!window.Telegram?.WebApp?.initData) {
+            console.warn("[DEV] Telegram WebApp SDK not found, using mock");
+            window.Telegram = { WebApp: {
+                initData: "",
+                initDataUnsafe: { user: { id: 0, first_name: "Dev" } },
+                themeParams: {},
+                colorScheme: "light",
+                expand: function() {},
+                ready: function() {},
+                close: function() { window.close(); },
+                MainButton: { show: function(){}, hide: function(){}, setText: function(){} },
+            }};
+        }
+
         // Initialize Telegram Mini App
         const tg = window.Telegram.WebApp;
         tg.expand();
