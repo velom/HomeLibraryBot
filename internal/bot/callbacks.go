@@ -201,15 +201,37 @@ func (b *Bot) handleStatsPeriodCallback(ctx context.Context, query *models.Callb
 // handleStatsParticipantCallback processes participant selection for statistics
 func (b *Bot) handleStatsParticipantCallback(ctx context.Context, query *models.CallbackQuery, state *ConversationState) {
 	participantName := strings.TrimPrefix(query.Data, "stats_participant:")
+	state.Data["participant_name"] = participantName
+	state.Step = 3
+
+	// Show mode selection
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "📊 Top 10", CallbackData: "stats_mode:top10"},
+				{Text: "📋 Полный список", CallbackData: "stats_mode:full"},
+			},
+		},
+	}
+	b.sendMessageInThreadWithMarkup(ctx, getChatIDFromQuery(query), "📋 Select display mode:", state.MessageThreadID, keyboard)
+}
+
+// handleStatsModeCallback processes display mode selection for statistics
+func (b *Bot) handleStatsModeCallback(ctx context.Context, query *models.CallbackQuery, state *ConversationState) {
+	mode := strings.TrimPrefix(query.Data, "stats_mode:")
 
 	startDate := state.Data["start_date"].(time.Time)
 	endDate := state.Data["end_date"].(time.Time)
 	periodLabel := state.Data["period_label"].(string)
+	participantName := state.Data["participant_name"].(string)
 
-	// Generate and send the report
-	b.generateAndSendStatsReport(ctx, getChatIDFromQuery(query), startDate, endDate, periodLabel, participantName, state.MessageThreadID)
+	limit := 10
+	if mode == "full" {
+		limit = 0
+	}
 
-	state.Step = -1 // Mark conversation as complete
+	b.generateAndSendStatsReport(ctx, getChatIDFromQuery(query), startDate, endDate, periodLabel, participantName, limit, state.MessageThreadID)
+	state.Step = -1
 }
 
 // showParticipantSelectionForStats shows the participant selection menu for statistics
@@ -251,9 +273,8 @@ func (b *Bot) showParticipantSelectionForStats(ctx context.Context, chatID int64
 }
 
 // generateAndSendStatsReport generates and sends the statistics report
-func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, startDate, endDate time.Time, periodLabel, participantName string, messageThreadID int) {
-	// Get top 10 books
-	stats, err := b.db.GetTopBooks(ctx, 10, startDate, endDate, participantName)
+func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, startDate, endDate time.Time, periodLabel, participantName string, limit int, messageThreadID int) {
+	stats, err := b.db.GetTopBooks(ctx, limit, startDate, endDate, participantName)
 	if err != nil {
 		b.logger.Error("Failed to get top books for stats report",
 			zap.Error(err),
@@ -295,7 +316,11 @@ func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, star
 		text.WriteString(fmt.Sprintf("👥 Participant: %s\n\n", participantName))
 	}
 
-	text.WriteString("📚 Top 10 Books:\n\n")
+	if limit > 0 {
+		text.WriteString(fmt.Sprintf("📚 Top %d Books:\n\n", limit))
+	} else {
+		text.WriteString("📚 All Books:\n\n")
+	}
 	for i, stat := range stats {
 		text.WriteString(fmt.Sprintf("%d. %s - %d reads\n", i+1, stat.BookName, stat.ReadCount))
 	}
