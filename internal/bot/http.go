@@ -19,7 +19,8 @@ import (
 // HTTPServer handles HTTP requests for the Mini App
 type HTTPServer struct {
 	bot         *Bot
-	webhookMode bool // If false (polling mode), skip authentication for easier local dev
+	webhookMode bool   // If false (polling mode), skip authentication for easier local dev
+	botToken    string // Bot token for initData validation; set from api.Token() at construction
 }
 
 // NewHTTPServer creates a new HTTP server for the Mini App
@@ -27,6 +28,7 @@ func NewHTTPServer(bot *Bot, webhookMode bool) *HTTPServer {
 	return &HTTPServer{
 		bot:         bot,
 		webhookMode: webhookMode,
+		botToken:    bot.api.Token(),
 	}
 }
 
@@ -61,7 +63,7 @@ func (hs *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // validateTelegramInitData validates the Telegram Mini App initData
-func (hs *HTTPServer) validateTelegramInitData(initData string) (int64, error) {
+func validateTelegramInitData(initData string, botToken string, allowedUsers map[int64]bool) (int64, error) {
 	if initData == "" {
 		return 0, fmt.Errorf("missing initData")
 	}
@@ -100,7 +102,7 @@ func (hs *HTTPServer) validateTelegramInitData(initData string) (int64, error) {
 
 	// Create secret key
 	secretKey := hmac.New(sha256.New, []byte("WebAppData"))
-	secretKey.Write([]byte(hs.bot.api.Token()))
+	secretKey.Write([]byte(botToken))
 	secret := secretKey.Sum(nil)
 
 	// Calculate hash
@@ -139,7 +141,7 @@ func (hs *HTTPServer) validateTelegramInitData(initData string) (int64, error) {
 	}
 
 	// Check if user is allowed
-	if !hs.bot.allowedUsers[userData.ID] {
+	if !allowedUsers[userData.ID] {
 		return 0, fmt.Errorf("user not allowed")
 	}
 
@@ -171,7 +173,7 @@ func (hs *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		initData := strings.TrimPrefix(authHeader, "tma ")
 
 		// Validate initData
-		userID, err := hs.validateTelegramInitData(initData)
+		userID, err := validateTelegramInitData(initData, hs.botToken, hs.bot.allowedUsers)
 		if err != nil {
 			hs.bot.logger.Warn("Failed to validate initData",
 				zap.Error(err),
