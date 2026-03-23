@@ -308,8 +308,11 @@ func (b *Bot) handleRareLabelCallback(ctx context.Context, query *models.Callbac
 	label := strings.TrimPrefix(query.Data, "rare_label:")
 	const limit = 10
 
+	// Exclude books with "Сами" label from rare books results
+	excludeLabels := []string{"Сами"}
+
 	// Get rarely read books by children
-	childrenStats, err := b.db.GetRarelyReadBooks(ctx, limit, true, label)
+	childrenStats, err := b.db.GetRarelyReadBooks(ctx, limit, true, label, excludeLabels)
 	if err != nil {
 		b.logger.Error("Failed to get rarely read books by children",
 			zap.Error(err),
@@ -321,7 +324,7 @@ func (b *Bot) handleRareLabelCallback(ctx context.Context, query *models.Callbac
 	}
 
 	// Get rarely read books by all participants
-	allStats, err := b.db.GetRarelyReadBooks(ctx, limit, false, label)
+	allStats, err := b.db.GetRarelyReadBooks(ctx, limit, false, label, excludeLabels)
 	if err != nil {
 		b.logger.Error("Failed to get rarely read books by all",
 			zap.Error(err),
