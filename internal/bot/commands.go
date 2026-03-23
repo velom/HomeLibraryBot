@@ -20,7 +20,9 @@ Available commands:
 /last - Show last 10 reading events
 /stats - View reading statistics
 /rare - Show rarely read books
-/add_label - Add a label to a book`
+/add_label - Add a label to a book
+/book_labels - Show labels for a book
+/books_by_label - Show books by label`
 
 	b.sendMessageInThread(ctx, message.Chat.ID, text, message.MessageThreadID)
 }
@@ -253,6 +255,106 @@ func (b *Bot) handleRareStart(ctx context.Context, message *models.Message) {
 	}
 
 	b.sendMessageInThreadWithMarkup(ctx, message.Chat.ID, "🏷 Filter by label:", message.MessageThreadID, keyboard)
+}
+
+// handleBookLabelsStart starts the book labels query command
+func (b *Bot) handleBookLabelsStart(ctx context.Context, message *models.Message) {
+	userID := message.From.ID
+
+	books, err := b.db.ListReadableBooks(ctx)
+	if err != nil {
+		b.logger.Error("Failed to list readable books",
+			zap.Error(err),
+			zap.Int64("user_id", userID),
+		)
+		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
+		return
+	}
+
+	if len(books) == 0 {
+		b.sendMessageInThread(ctx, message.Chat.ID, "No readable books available.", message.MessageThreadID)
+		return
+	}
+
+	b.statesMu.Lock()
+	b.states[userID] = &ConversationState{
+		Command:         "book_labels",
+		Step:            1,
+		Data:            make(map[string]interface{}),
+		MessageThreadID: message.MessageThreadID,
+	}
+	b.statesMu.Unlock()
+
+	// Build inline keyboard with books in 2 columns
+	var rows [][]models.InlineKeyboardButton
+	var currentRow []models.InlineKeyboardButton
+	for i, book := range books {
+		button := models.InlineKeyboardButton{
+			Text:         book.Name,
+			CallbackData: fmt.Sprintf("booklabels:%d", i),
+		}
+		currentRow = append(currentRow, button)
+
+		if len(currentRow) == 2 || i == len(books)-1 {
+			rows = append(rows, currentRow)
+			currentRow = []models.InlineKeyboardButton{}
+		}
+	}
+
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: rows,
+	}
+	b.sendMessageInThreadWithMarkup(ctx, message.Chat.ID, "📚 Select a book to see its labels:", message.MessageThreadID, keyboard)
+}
+
+// handleBooksByLabelStart starts the books by label query command
+func (b *Bot) handleBooksByLabelStart(ctx context.Context, message *models.Message) {
+	userID := message.From.ID
+
+	labels, err := b.db.GetAllLabels(ctx)
+	if err != nil {
+		b.logger.Error("Failed to get labels",
+			zap.Error(err),
+			zap.Int64("user_id", userID),
+		)
+		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Error: %v", err), message.MessageThreadID)
+		return
+	}
+
+	if len(labels) == 0 {
+		b.sendMessageInThread(ctx, message.Chat.ID, "No labels found. Use /add_label to add labels to books.", message.MessageThreadID)
+		return
+	}
+
+	b.statesMu.Lock()
+	b.states[userID] = &ConversationState{
+		Command:         "books_by_label",
+		Step:            1,
+		Data:            make(map[string]interface{}),
+		MessageThreadID: message.MessageThreadID,
+	}
+	b.statesMu.Unlock()
+
+	// Build inline keyboard with labels in 2 columns
+	var rows [][]models.InlineKeyboardButton
+	var currentRow []models.InlineKeyboardButton
+	for i, label := range labels {
+		button := models.InlineKeyboardButton{
+			Text:         label,
+			CallbackData: fmt.Sprintf("booksbylabel:%s", label),
+		}
+		currentRow = append(currentRow, button)
+
+		if len(currentRow) == 2 || i == len(labels)-1 {
+			rows = append(rows, currentRow)
+			currentRow = []models.InlineKeyboardButton{}
+		}
+	}
+
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: rows,
+	}
+	b.sendMessageInThreadWithMarkup(ctx, message.Chat.ID, "🏷 Select a label to see its books:", message.MessageThreadID, keyboard)
 }
 
 // handleAddLabelStart starts the add label command

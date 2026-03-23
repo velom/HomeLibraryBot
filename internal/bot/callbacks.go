@@ -376,6 +376,69 @@ func (b *Bot) handleRareLabelCallback(ctx context.Context, query *models.Callbac
 	state.Step = -1 // Mark conversation as complete
 }
 
+// handleBookLabelsCallback processes book selection for the book_labels command
+func (b *Bot) handleBookLabelsCallback(ctx context.Context, query *models.CallbackQuery, state *ConversationState) {
+	indexStr := strings.TrimPrefix(query.Data, "booklabels:")
+	bookIdx, err := strconv.Atoi(indexStr)
+	if err != nil {
+		return
+	}
+
+	books, err := b.db.ListReadableBooks(ctx)
+	if err != nil || bookIdx < 0 || bookIdx >= len(books) {
+		b.sendMessageInThread(ctx, getChatIDFromQuery(query), "Error: Invalid book selection", state.MessageThreadID)
+		state.Step = -1
+		return
+	}
+
+	selectedBook := books[bookIdx]
+
+	var text strings.Builder
+	text.WriteString(fmt.Sprintf("🏷 Labels for \"%s\":\n\n", selectedBook.Name))
+
+	if len(selectedBook.Labels) == 0 {
+		text.WriteString("No labels found for this book.")
+	} else {
+		for _, label := range selectedBook.Labels {
+			text.WriteString(fmt.Sprintf("• %s\n", label))
+		}
+	}
+
+	b.sendMessageInThread(ctx, getChatIDFromQuery(query), text.String(), state.MessageThreadID)
+	state.Step = -1
+}
+
+// handleBooksByLabelCallback processes label selection for the books_by_label command
+func (b *Bot) handleBooksByLabelCallback(ctx context.Context, query *models.CallbackQuery, state *ConversationState) {
+	label := strings.TrimPrefix(query.Data, "booksbylabel:")
+
+	books, err := b.db.GetBooksByLabel(ctx, label)
+	if err != nil {
+		b.logger.Error("Failed to get books by label",
+			zap.Error(err),
+			zap.Int64("user_id", query.From.ID),
+			zap.String("label", label),
+		)
+		b.sendMessageInThread(ctx, getChatIDFromQuery(query), fmt.Sprintf("Error: %v", err), state.MessageThreadID)
+		state.Step = -1
+		return
+	}
+
+	var text strings.Builder
+	text.WriteString(fmt.Sprintf("📚 Books with label \"%s\":\n\n", label))
+
+	if len(books) == 0 {
+		text.WriteString("No books found with this label.")
+	} else {
+		for i, book := range books {
+			text.WriteString(fmt.Sprintf("%d. %s\n", i+1, book.Name))
+		}
+	}
+
+	b.sendMessageInThread(ctx, getChatIDFromQuery(query), text.String(), state.MessageThreadID)
+	state.Step = -1
+}
+
 // handleAddLabelBookCallback processes book selection for add label command
 func (b *Bot) handleAddLabelBookCallback(ctx context.Context, query *models.CallbackQuery, state *ConversationState) {
 	indexStr := strings.TrimPrefix(query.Data, "addlabel_book:")

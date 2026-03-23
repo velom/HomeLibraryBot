@@ -14,6 +14,7 @@ type Storage interface {
 	ListReadableBooks(ctx context.Context) ([]models.Book, error)
 	AddLabelToBook(ctx context.Context, bookName string, label string) error
 	GetBooksWithoutLabel(ctx context.Context, label string) ([]models.Book, error)
+	GetBooksByLabel(ctx context.Context, label string) ([]models.Book, error)
 	GetAllLabels(ctx context.Context) ([]string, error)
 
 	// Participant operations

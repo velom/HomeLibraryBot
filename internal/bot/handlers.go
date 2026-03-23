@@ -109,6 +109,10 @@ func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 			b.handleRareStart(ctx, message)
 		case "add_label":
 			b.handleAddLabelStart(ctx, message)
+		case "book_labels":
+			b.handleBookLabelsStart(ctx, message)
+		case "books_by_label":
+			b.handleBooksByLabelStart(ctx, message)
 		default:
 			b.logger.Warn("Unknown command",
 				zap.String("command", cmdText),
@@ -183,6 +187,10 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 		b.handleRareLabelCallback(ctx, query, state)
 	} else if strings.HasPrefix(data, "addlabel_book:") {
 		b.handleAddLabelBookCallback(ctx, query, state)
+	} else if strings.HasPrefix(data, "booklabels:") {
+		b.handleBookLabelsCallback(ctx, query, state)
+	} else if strings.HasPrefix(data, "booksbylabel:") {
+		b.handleBooksByLabelCallback(ctx, query, state)
 	} else {
 		b.logger.Warn("Unknown callback prefix",
 			zap.String("callback_data", data),

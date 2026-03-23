@@ -123,6 +123,30 @@ func (db *ClickHouseDB) GetBooksWithoutLabel(ctx context.Context, label string) 
 	return books, nil
 }
 
+// GetBooksByLabel returns books that have the specified label
+func (db *ClickHouseDB) GetBooksByLabel(ctx context.Context, label string) ([]models.Book, error) {
+	rows, err := db.conn.Query(ctx, `
+		SELECT name, is_readable, labels
+		FROM books
+		WHERE is_readable = true AND has(labels, ?)
+		ORDER BY name`,
+		label)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get books by label: %w", err)
+	}
+	defer rows.Close()
+
+	var books []models.Book
+	for rows.Next() {
+		var book models.Book
+		if err := rows.Scan(&book.Name, &book.IsReadable, &book.Labels); err != nil {
+			return nil, fmt.Errorf("failed to scan book: %w", err)
+		}
+		books = append(books, book)
+	}
+	return books, nil
+}
+
 // GetAllLabels returns all unique labels across all books
 func (db *ClickHouseDB) GetAllLabels(ctx context.Context) ([]string, error) {
 	rows, err := db.conn.Query(ctx, `

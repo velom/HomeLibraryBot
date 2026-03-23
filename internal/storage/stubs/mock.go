@@ -164,6 +164,33 @@ func (m *MockDB) GetBooksWithoutLabel(ctx context.Context, label string) ([]mode
 	return books, nil
 }
 
+// GetBooksByLabel returns books that have the specified label
+func (m *MockDB) GetBooksByLabel(ctx context.Context, label string) ([]models.Book, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var books []models.Book
+	for _, book := range m.books {
+		if !book.IsReadable {
+			continue
+		}
+
+		for _, bookLabel := range book.Labels {
+			if bookLabel == label {
+				books = append(books, book)
+				break
+			}
+		}
+	}
+
+	// Sort by name
+	sort.Slice(books, func(i, j int) bool {
+		return books[i].Name < books[j].Name
+	})
+
+	return books, nil
+}
+
 // GetAllLabels returns all unique labels across all books
 func (m *MockDB) GetAllLabels(ctx context.Context) ([]string, error) {
 	m.mu.RLock()
