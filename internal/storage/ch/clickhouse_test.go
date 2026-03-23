@@ -713,6 +713,34 @@ func TestClickHouseDB_GetRarelyReadBooks_WithLabel(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, stats)
 	})
+
+	t.Run("Exclude books by label", func(t *testing.T) {
+		// Exclude fiction books, should only return kids (Book C) and unlabeled (Book D)
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "", []string{"fiction"})
+		require.NoError(t, err)
+		require.Len(t, stats, 2)
+
+		// Book C (20 days ago) should be first
+		assert.Equal(t, "Book C", stats[0].BookName)
+		assert.GreaterOrEqual(t, stats[0].DaysSinceLastRead, 19)
+
+		// Book D (never read) should be last
+		assert.Equal(t, "Book D", stats[1].BookName)
+		assert.Equal(t, -1, stats[1].DaysSinceLastRead)
+	})
+
+	t.Run("Include label and exclude label combined", func(t *testing.T) {
+		// Include fiction but exclude Book A specifically by adding a unique label
+		err := db.AddLabelToBook(ctx, "Book A", "exclude-me")
+		require.NoError(t, err)
+
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "fiction", []string{"exclude-me"})
+		require.NoError(t, err)
+		require.Len(t, stats, 1)
+
+		// Only Book B has fiction but not exclude-me
+		assert.Equal(t, "Book B", stats[0].BookName)
+	})
 }
 
 // TestClickHouseDB_Close tests connection closing
