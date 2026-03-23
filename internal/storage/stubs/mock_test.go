@@ -186,6 +186,50 @@ func TestMockDB_Events(t *testing.T) {
 	}
 }
 
+func TestMockDB_GetBooksByLabel(t *testing.T) {
+	db := NewMockDB()
+	ctx := context.Background()
+
+	if err := db.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	// Add labels to some books
+	_ = db.AddLabelToBook(ctx, "The Hobbit", "Fantasy")
+	_ = db.AddLabelToBook(ctx, "Harry Potter and the Philosopher's Stone", "Fantasy")
+	_ = db.AddLabelToBook(ctx, "The Cat in the Hat", "Rhymes")
+
+	// Get books by label "Fantasy"
+	books, err := db.GetBooksByLabel(ctx, "Fantasy")
+	if err != nil {
+		t.Fatalf("Failed to get books by label: %v", err)
+	}
+
+	if len(books) != 2 {
+		t.Errorf("Expected 2 books with label 'Fantasy', got %d", len(books))
+	}
+
+	// Verify sorted by name
+	if len(books) == 2 {
+		if books[0].Name != "Harry Potter and the Philosopher's Stone" {
+			t.Errorf("Expected first book to be Harry Potter, got %s", books[0].Name)
+		}
+		if books[1].Name != "The Hobbit" {
+			t.Errorf("Expected second book to be The Hobbit, got %s", books[1].Name)
+		}
+	}
+
+	// Get books by label that doesn't exist
+	books, err = db.GetBooksByLabel(ctx, "NonExistent")
+	if err != nil {
+		t.Fatalf("Failed to get books by label: %v", err)
+	}
+
+	if len(books) != 0 {
+		t.Errorf("Expected 0 books with label 'NonExistent', got %d", len(books))
+	}
+}
+
 func TestMockDB_GetLastEvents_Limit(t *testing.T) {
 	db := NewMockDB()
 	ctx := context.Background()
