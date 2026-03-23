@@ -24,7 +24,7 @@ const testBotToken = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 func generateTestInitData(t *testing.T, token string, userID int64, authDate time.Time) string {
 	t.Helper()
 
-	userData, err := json.Marshal(map[string]interface{}{
+	userData, err := json.Marshal(map[string]any{
 		"id":         userID,
 		"first_name": "Test",
 		"username":   "testuser",
