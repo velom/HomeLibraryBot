@@ -35,8 +35,9 @@ type Storage interface {
 	// If childrenOnly is true, only considers reads by children (IsParent=false)
 	// If childrenOnly is false, considers reads by all participants
 	// If label is not empty, only returns books with that label
+	// If excludeLabels is not empty, excludes books that have any of the specified labels
 	// Books never read are included with DaysSinceLastRead=-1
-	GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool, label string) ([]models.RareBookStat, error)
+	GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool, label string, excludeLabels []string) ([]models.RareBookStat, error)
 
 	// Lifecycle
 	Initialize(ctx context.Context) error

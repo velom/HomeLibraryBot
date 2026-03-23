@@ -328,7 +328,7 @@ func (m *MockDB) GetTopBooks(ctx context.Context, limit int, startDate, endDate 
 // If childrenOnly is false, considers reads by all participants
 // If label is not empty, only returns books with that label
 // Books never read are included with DaysSinceLastRead=-1
-func (m *MockDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool, label string) ([]models.RareBookStat, error) {
+func (m *MockDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool, label string, excludeLabels []string) ([]models.RareBookStat, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -370,6 +370,25 @@ func (m *MockDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly
 				}
 			}
 			if !hasLabel {
+				continue
+			}
+		}
+
+		// Exclude books with any of the excluded labels
+		if len(excludeLabels) > 0 {
+			excluded := false
+			for _, bookLabel := range book.Labels {
+				for _, excl := range excludeLabels {
+					if bookLabel == excl {
+						excluded = true
+						break
+					}
+				}
+				if excluded {
+					break
+				}
+			}
+			if excluded {
 				continue
 			}
 		}

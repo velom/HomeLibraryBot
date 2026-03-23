@@ -439,7 +439,7 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 	// Book E - never read
 
 	t.Run("Children only - includes books never read by children", func(t *testing.T) {
-		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "")
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "", nil)
 		require.NoError(t, err)
 		require.Len(t, stats, 5)
 
@@ -462,7 +462,7 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 	})
 
 	t.Run("All participants - includes all reads", func(t *testing.T) {
-		stats, err := db.GetRarelyReadBooks(ctx, 10, false, "")
+		stats, err := db.GetRarelyReadBooks(ctx, 10, false, "", nil)
 		require.NoError(t, err)
 		require.Len(t, stats, 5)
 
@@ -486,7 +486,7 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 	})
 
 	t.Run("Limit results", func(t *testing.T) {
-		stats, err := db.GetRarelyReadBooks(ctx, 3, false, "")
+		stats, err := db.GetRarelyReadBooks(ctx, 3, false, "", nil)
 		require.NoError(t, err)
 		assert.Len(t, stats, 3)
 	})
@@ -496,7 +496,7 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 		dbEmpty, cleanupEmpty := setupTestDB(t)
 		defer cleanupEmpty()
 
-		stats, err := dbEmpty.GetRarelyReadBooks(ctx, 10, false, "")
+		stats, err := dbEmpty.GetRarelyReadBooks(ctx, 10, false, "", nil)
 		require.NoError(t, err)
 		assert.Empty(t, stats)
 	})
@@ -511,7 +511,7 @@ func TestClickHouseDB_GetRarelyReadBooks(t *testing.T) {
 		_, err = dbNoEvents.CreateBook(ctx, "Never Read 2")
 		require.NoError(t, err)
 
-		stats, err := dbNoEvents.GetRarelyReadBooks(ctx, 10, false, "")
+		stats, err := dbNoEvents.GetRarelyReadBooks(ctx, 10, false, "", nil)
 		require.NoError(t, err)
 		require.Len(t, stats, 2)
 
@@ -685,7 +685,7 @@ func TestClickHouseDB_GetRarelyReadBooks_WithLabel(t *testing.T) {
 	// Book D never read
 
 	t.Run("Filter by fiction label", func(t *testing.T) {
-		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "fiction")
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "fiction", nil)
 		require.NoError(t, err)
 		require.Len(t, stats, 2)
 
@@ -699,7 +699,7 @@ func TestClickHouseDB_GetRarelyReadBooks_WithLabel(t *testing.T) {
 	})
 
 	t.Run("Filter by kids label", func(t *testing.T) {
-		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "kids")
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "kids", nil)
 		require.NoError(t, err)
 		require.Len(t, stats, 1)
 
@@ -709,9 +709,37 @@ func TestClickHouseDB_GetRarelyReadBooks_WithLabel(t *testing.T) {
 	})
 
 	t.Run("Filter by non-existent label", func(t *testing.T) {
-		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "nonexistent")
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "nonexistent", nil)
 		require.NoError(t, err)
 		assert.Empty(t, stats)
+	})
+
+	t.Run("Exclude books by label", func(t *testing.T) {
+		// Exclude fiction books, should only return kids (Book C) and unlabeled (Book D)
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "", []string{"fiction"})
+		require.NoError(t, err)
+		require.Len(t, stats, 2)
+
+		// Book C (20 days ago) should be first
+		assert.Equal(t, "Book C", stats[0].BookName)
+		assert.GreaterOrEqual(t, stats[0].DaysSinceLastRead, 19)
+
+		// Book D (never read) should be last
+		assert.Equal(t, "Book D", stats[1].BookName)
+		assert.Equal(t, -1, stats[1].DaysSinceLastRead)
+	})
+
+	t.Run("Include label and exclude label combined", func(t *testing.T) {
+		// Include fiction but exclude Book A specifically by adding a unique label
+		err := db.AddLabelToBook(ctx, "Book A", "exclude-me")
+		require.NoError(t, err)
+
+		stats, err := db.GetRarelyReadBooks(ctx, 10, true, "fiction", []string{"exclude-me"})
+		require.NoError(t, err)
+		require.Len(t, stats, 1)
+
+		// Only Book B has fiction but not exclude-me
+		assert.Equal(t, "Book B", stats[0].BookName)
 	})
 }
 

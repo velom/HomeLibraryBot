@@ -284,9 +284,15 @@ func (db *ClickHouseDB) GetTopBooks(ctx context.Context, limit int, startDate, e
 // If childrenOnly is false, considers reads by all participants
 // If label is not empty, only returns books with that label
 // Books never read are included with DaysSinceLastRead=-1
-func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool, label string) ([]models.RareBookStat, error) {
+func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool, label string, excludeLabels []string) ([]models.RareBookStat, error) {
 	var query string
 	var args []interface{}
+
+	// Build dynamic WHERE conditions
+	excludeCondition := ""
+	if len(excludeLabels) > 0 {
+		excludeCondition = " AND NOT hasAny(b.labels, ?)"
+	}
 
 	if childrenOnly {
 		// Only consider reads by children
@@ -303,7 +309,7 @@ func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, child
 					INNER JOIN participants p ON e.participant_name = p.name
 					WHERE p.is_parent = false
 				) e ON b.name = e.book_name
-				WHERE b.is_readable = true AND has(b.labels, ?)
+				WHERE b.is_readable = true AND has(b.labels, ?)` + excludeCondition + `
 				GROUP BY b.name
 				ORDER BY
 					(max(e.date) <= toDateTime(0)) ASC,
@@ -311,7 +317,11 @@ func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, child
 					book_name ASC
 				LIMIT ?
 			`
-			args = []interface{}{label, limit}
+			args = []interface{}{label}
+			if len(excludeLabels) > 0 {
+				args = append(args, excludeLabels)
+			}
+			args = append(args, limit)
 		} else {
 			query = `
 				SELECT
@@ -325,7 +335,7 @@ func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, child
 					INNER JOIN participants p ON e.participant_name = p.name
 					WHERE p.is_parent = false
 				) e ON b.name = e.book_name
-				WHERE b.is_readable = true
+				WHERE b.is_readable = true` + excludeCondition + `
 				GROUP BY b.name
 				ORDER BY
 					(max(e.date) <= toDateTime(0)) ASC,
@@ -333,7 +343,11 @@ func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, child
 					book_name ASC
 				LIMIT ?
 			`
-			args = []interface{}{limit}
+			args = []interface{}{}
+			if len(excludeLabels) > 0 {
+				args = append(args, excludeLabels)
+			}
+			args = append(args, limit)
 		}
 	} else {
 		// Consider reads by all participants
@@ -345,7 +359,7 @@ func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, child
 					if(max(e.date) <= toDateTime(0), -1, dateDiff('day', max(e.date), now())) as days_since_last_read
 				FROM books b
 				LEFT JOIN events e ON b.name = e.book_name
-				WHERE b.is_readable = true AND has(b.labels, ?)
+				WHERE b.is_readable = true AND has(b.labels, ?)` + excludeCondition + `
 				GROUP BY b.name
 				ORDER BY
 					(max(e.date) <= toDateTime(0)) ASC,
@@ -353,7 +367,11 @@ func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, child
 					book_name ASC
 				LIMIT ?
 			`
-			args = []interface{}{label, limit}
+			args = []interface{}{label}
+			if len(excludeLabels) > 0 {
+				args = append(args, excludeLabels)
+			}
+			args = append(args, limit)
 		} else {
 			query = `
 				SELECT
@@ -362,7 +380,7 @@ func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, child
 					if(max(e.date) <= toDateTime(0), -1, dateDiff('day', max(e.date), now())) as days_since_last_read
 				FROM books b
 				LEFT JOIN events e ON b.name = e.book_name
-				WHERE b.is_readable = true
+				WHERE b.is_readable = true` + excludeCondition + `
 				GROUP BY b.name
 				ORDER BY
 					(max(e.date) <= toDateTime(0)) ASC,
@@ -370,7 +388,11 @@ func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, child
 					book_name ASC
 				LIMIT ?
 			`
-			args = []interface{}{limit}
+			args = []interface{}{}
+			if len(excludeLabels) > 0 {
+				args = append(args, excludeLabels)
+			}
+			args = append(args, limit)
 		}
 	}
 
