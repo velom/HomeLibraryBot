@@ -2,6 +2,31 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Autonomous Workflow
+
+**CRITICAL: Work autonomously. Do NOT ask the user for confirmation or clarification unless the situation is truly ambiguous and a wrong decision would be destructive or irreversible. Make decisions independently.**
+
+When receiving a task, follow this workflow:
+
+1. **Explore & understand** — Read relevant code, understand the context.
+2. **Plan** — Prepare an implementation plan. Use the `superpowers:writing-plans` skill.
+3. **Review the plan** — Launch a code-reviewer agent to review the plan before implementation.
+4. **Implement** — Execute the plan. Use TDD where appropriate. Run `make test` to verify.
+5. **Verify** — Run `make build` and `make test`. Fix any issues.
+6. **Branch, commit, PR** — Create a feature branch, commit changes, and open a PR. Use the `commit-commands:commit-push-pr` skill or do it manually:
+   - `git checkout -b <descriptive-branch-name>`
+   - `git add <files>`
+   - `git commit`
+   - `git push -u origin <branch>`
+   - `gh pr create`
+
+**Rules:**
+- Do NOT ask "should I proceed?" — just proceed.
+- Do NOT ask "which approach?" — pick the best one and go.
+- Do NOT present options — make the decision.
+- Only ask the user if a decision is truly ambiguous AND the wrong choice would be hard to reverse.
+- If unsure between two reasonable approaches, pick the simpler one.
+
 ## Project Overview
 
 This is a Go project named "library" using Go 1.25.
