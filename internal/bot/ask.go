@@ -122,7 +122,7 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 		answer, newHistory, err := b.runAskWithTools(ctx, history)
 		if err != nil {
 			b.logger.Error("LLM request failed", zap.Error(err))
-			b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при обращении к ИИ. Попробуйте позже.", message.MessageThreadID)
+			b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Ошибка при обращении к ИИ: %v", err), message.MessageThreadID)
 			return
 		}
 		history = newHistory
@@ -157,7 +157,7 @@ func (b *Bot) handleAskConversation(ctx context.Context, message *models.Message
 	answer, newHistory, err := b.runAskWithTools(ctx, history)
 	if err != nil {
 		b.logger.Error("LLM request failed", zap.Error(err))
-		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при обращении к ИИ. Попробуйте позже.", state.MessageThreadID)
+		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Ошибка при обращении к ИИ: %v", err), state.MessageThreadID)
 		return
 	}
 
@@ -367,6 +367,10 @@ func (b *Bot) toolGetLabels(ctx context.Context) string {
 func (b *Bot) sendAskResponse(ctx context.Context, chatID int64, answer string, threadID int) {
 	if b.api == nil {
 		return
+	}
+
+	if strings.TrimSpace(answer) == "" {
+		answer = "ИИ не вернул ответ. Попробуйте переформулировать вопрос."
 	}
 
 	if len([]rune(answer)) > 4096 {
