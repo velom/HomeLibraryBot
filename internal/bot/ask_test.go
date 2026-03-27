@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +11,7 @@ import (
 func TestBuildAskSystemPrompt_WithData(t *testing.T) {
 	books := []models.Book{
 		{Name: "Колобок", IsReadable: true, Labels: []string{"Сказки", "Детям"}},
-		{Name: "Война и мир", IsReadable: false, Labels: nil},
+		{Name: "Теремок", IsReadable: true, Labels: nil},
 	}
 	participants := []models.Participant{
 		{Name: "Миша", IsParent: false},
@@ -26,7 +25,7 @@ func TestBuildAskSystemPrompt_WithData(t *testing.T) {
 
 	assert.Contains(t, prompt, "Колобок")
 	assert.Contains(t, prompt, "Сказки, Детям")
-	assert.Contains(t, prompt, "Война и мир")
+	assert.Contains(t, prompt, "Теремок")
 	assert.Contains(t, prompt, "Миша")
 	assert.Contains(t, prompt, "ребёнок")
 	assert.Contains(t, prompt, "Папа")
@@ -58,5 +57,4 @@ func TestBuildAskSystemPrompt_BookWithNoLabels(t *testing.T) {
 	prompt := buildAskSystemPrompt(books, nil, nil)
 
 	assert.Contains(t, prompt, "Книга без меток")
-	assert.True(t, strings.Contains(prompt, "Книга без меток"))
 }

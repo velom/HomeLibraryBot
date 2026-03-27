@@ -437,8 +437,8 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 		return
 	}
 
-	if len(answer) > 4096 {
-		answer = answer[:4093] + "..."
+	if len([]rune(answer)) > 4096 {
+		answer = string([]rune(answer)[:4093]) + "..."
 	}
 
 	b.sendMessageInThread(ctx, message.Chat.ID, answer, message.MessageThreadID)
@@ -456,11 +456,6 @@ func buildAskSystemPrompt(books []appmodels.Book, participants []appmodels.Parti
 		line := book.Name
 		if len(book.Labels) > 0 {
 			line += fmt.Sprintf(" [метки: %s]", strings.Join(book.Labels, ", "))
-		}
-		if book.IsReadable {
-			line += " — доступна для чтения"
-		} else {
-			line += " — не доступна"
 		}
 		sb.WriteString(line + "\n")
 	}
