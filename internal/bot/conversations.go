@@ -23,6 +23,8 @@ func (b *Bot) handleConversation(ctx context.Context, message *models.Message, s
 		b.handleStatsConversation(ctx, message, state)
 	case "add_label":
 		b.handleAddLabelConversation(ctx, message, state)
+	case "ask":
+		b.handleAskConversation(ctx, message, state)
 	}
 
 	// Clean up completed conversations

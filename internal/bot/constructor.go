@@ -7,11 +7,12 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
+	"library/internal/llm"
 	"library/internal/storage"
 )
 
 // NewBot creates a new Telegram bot
-func NewBot(token string, db storage.Storage, allowedUserIDs []int64, notificationChatID int64, notificationThreadID int, logger *zap.Logger) (*Bot, error) {
+func NewBot(token string, db storage.Storage, allowedUserIDs []int64, notificationChatID int64, notificationThreadID int, llmClient *llm.Client, logger *zap.Logger) (*Bot, error) {
 	allowedUsers := make(map[int64]bool)
 	for _, id := range allowedUserIDs {
 		allowedUsers[id] = true
@@ -25,6 +26,7 @@ func NewBot(token string, db storage.Storage, allowedUserIDs []int64, notificati
 		logger:               logger,
 		notificationChatID:   notificationChatID,
 		notificationThreadID: notificationThreadID,
+		llmClient:            llmClient,
 	}
 
 	// Create bot with handlers

@@ -16,6 +16,7 @@ import (
 
 	"library/internal/bot"
 	"library/internal/config"
+	"library/internal/llm"
 	"library/internal/storage"
 	"library/internal/storage/ch"
 	"library/internal/storage/stubs"
@@ -122,7 +123,22 @@ func (a *App) initDatabase() error {
 
 // initBot initializes the Telegram bot
 func (a *App) initBot() error {
-	telegramBot, err := bot.NewBot(a.config.TelegramToken, a.db, a.config.AllowedUserIDs, a.config.NotificationChatID, a.config.NotificationThreadID, a.logger)
+	var llmClient *llm.Client
+	if a.config.LLMApiKey != "" {
+		llmClient = llm.NewClient(llm.Config{
+			BaseURL: a.config.LLMBaseURL,
+			APIKey:  a.config.LLMApiKey,
+			Model:   a.config.LLMModel,
+		}, a.logger)
+		a.logger.Info("LLM client initialized",
+			zap.String("base_url", a.config.LLMBaseURL),
+			zap.String("model", a.config.LLMModel),
+		)
+	} else {
+		a.logger.Info("LLM client not configured (LLM_API_KEY not set)")
+	}
+
+	telegramBot, err := bot.NewBot(a.config.TelegramToken, a.db, a.config.AllowedUserIDs, a.config.NotificationChatID, a.config.NotificationThreadID, llmClient, a.logger)
 	if err != nil {
 		a.logger.Error("Failed to create Telegram bot", zap.Error(err))
 		return fmt.Errorf("failed to create Telegram bot: %w", err)

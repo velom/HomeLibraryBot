@@ -23,6 +23,9 @@ type Storage interface {
 	// Event operations
 	CreateEvent(ctx context.Context, date time.Time, bookName, participantName string) error
 	GetLastEvents(ctx context.Context, limit int) ([]models.Event, error)
+	// GetLastEventsFiltered returns events with optional date range and participant filters.
+	// Zero-value times mean no bound. Empty participant means no filter.
+	GetLastEventsFiltered(ctx context.Context, limit int, since, until time.Time, participant string) ([]models.Event, error)
 
 	// Statistics operations
 

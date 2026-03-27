@@ -218,6 +218,43 @@ func (db *ClickHouseDB) GetLastEvents(ctx context.Context, limit int) ([]models.
 	return events, nil
 }
 
+func (db *ClickHouseDB) GetLastEventsFiltered(ctx context.Context, limit int, since, until time.Time, participant string) ([]models.Event, error) {
+	query := `SELECT date, book_name, participant_name FROM events WHERE 1=1`
+	var args []interface{}
+
+	if !since.IsZero() {
+		query += ` AND date >= ?`
+		args = append(args, since)
+	}
+	if !until.IsZero() {
+		query += ` AND date <= ?`
+		args = append(args, until)
+	}
+	if participant != "" {
+		query += ` AND lower(participant_name) = lower(?)`
+		args = append(args, participant)
+	}
+
+	query += ` ORDER BY date DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := db.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get filtered events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []models.Event
+	for rows.Next() {
+		var event models.Event
+		if err := rows.Scan(&event.Date, &event.BookName, &event.ParticipantName); err != nil {
+			return nil, fmt.Errorf("failed to scan event: %w", err)
+		}
+		events = append(events, event)
+	}
+	return events, nil
+}
+
 // GetTopBooks returns top N books by read count within the specified time period
 // If participantName is empty, returns statistics for all children (IsParent=false)
 // If participantName is provided, returns statistics only for that participant

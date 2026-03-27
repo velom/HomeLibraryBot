@@ -113,6 +113,8 @@ func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 			b.handleBookLabelsStart(ctx, message)
 		case "books_by_label":
 			b.handleBooksByLabelStart(ctx, message)
+		case "ask":
+			b.handleAsk(ctx, message)
 		default:
 			b.logger.Warn("Unknown command",
 				zap.String("command", cmdText),

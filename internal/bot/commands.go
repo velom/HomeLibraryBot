@@ -22,7 +22,8 @@ Available commands:
 /rare - Show rarely read books
 /add_label - Add a label to a book
 /book_labels - Show labels for a book
-/books_by_label - Show books by label`
+/books_by_label - Show books by label
+/ask - Ask a question about your library (AI)`
 
 	b.sendMessageInThread(ctx, message.Chat.ID, text, message.MessageThreadID)
 }
