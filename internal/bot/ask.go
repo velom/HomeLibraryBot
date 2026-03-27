@@ -47,9 +47,12 @@ var askTools = []llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "get_last_events",
-			Description: "Получить последние события чтения. Формат: дата, кто выбрал, какую книгу",
+			Description: "Получить события чтения. Можно фильтровать по дате и участнику. Возвращает: дата, кто выбрал, какую книгу",
 			Parameters: json.RawMessage(`{"type":"object","properties":{
-				"limit":{"type":"integer","description":"Количество последних событий (по умолчанию 20, максимум 100)"}
+				"limit":{"type":"integer","description":"Количество событий (по умолчанию 20, максимум 100)"},
+				"since":{"type":"string","description":"Дата начала в формате YYYY-MM-DD (только события с этой даты)"},
+				"until":{"type":"string","description":"Дата конца в формате YYYY-MM-DD (только события до этой даты включительно)"},
+				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все)"}
 			}}`),
 		},
 	},
@@ -218,7 +221,10 @@ func (b *Bot) executeTool(ctx context.Context, name, argsJSON string) string {
 		if limit > 100 {
 			limit = 100
 		}
-		return b.toolGetLastEvents(ctx, limit)
+		since := stringArg(args, "since", "")
+		until := stringArg(args, "until", "")
+		participant := stringArg(args, "participant", "")
+		return b.toolGetLastEvents(ctx, limit, since, until, participant)
 	case "get_top_books":
 		days := intArg(args, "days", 30)
 		participant := stringArg(args, "participant", "")
@@ -273,17 +279,52 @@ func (b *Bot) toolGetParticipants(ctx context.Context) string {
 	return sb.String()
 }
 
-func (b *Bot) toolGetLastEvents(ctx context.Context, limit int) string {
-	events, err := b.db.GetLastEvents(ctx, limit)
+func (b *Bot) toolGetLastEvents(ctx context.Context, limit int, since, until, participant string) string {
+	// Fetch more than needed if we'll filter, to ensure enough results after filtering
+	fetchLimit := limit
+	if since != "" || until != "" || participant != "" {
+		fetchLimit = limit * 5
+		if fetchLimit > 500 {
+			fetchLimit = 500
+		}
+	}
+
+	events, err := b.db.GetLastEvents(ctx, fetchLimit)
 	if err != nil {
 		return fmt.Sprintf("error: %v", err)
 	}
-	var sb strings.Builder
-	for i, e := range events {
-		sb.WriteString(fmt.Sprintf("%d. %s | %s | %s\n", i+1, e.Date.Format("2006-01-02"), e.ParticipantName, e.BookName))
+
+	// Apply filters
+	var sinceDate, untilDate time.Time
+	if since != "" {
+		sinceDate, _ = time.Parse("2006-01-02", since)
 	}
-	if len(events) == 0 {
-		sb.WriteString("(нет событий)\n")
+	if until != "" {
+		untilDate, _ = time.Parse("2006-01-02", until)
+		// Include the entire "until" day
+		untilDate = untilDate.Add(24*time.Hour - time.Second)
+	}
+
+	var sb strings.Builder
+	count := 0
+	for _, e := range events {
+		if since != "" && e.Date.Before(sinceDate) {
+			continue
+		}
+		if until != "" && e.Date.After(untilDate) {
+			continue
+		}
+		if participant != "" && e.ParticipantName != participant {
+			continue
+		}
+		count++
+		sb.WriteString(fmt.Sprintf("%d. %s | %s | %s\n", count, e.Date.Format("2006-01-02"), e.ParticipantName, e.BookName))
+		if count >= limit {
+			break
+		}
+	}
+	if count == 0 {
+		sb.WriteString("(нет событий за указанный период)\n")
 	}
 	return sb.String()
 }
