@@ -380,22 +380,6 @@ func (b *Bot) handleAddLabelStart(ctx context.Context, message *models.Message) 
 
 // handleAsk handles the /ask command — starts a conversational LLM session
 func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
-	question := strings.TrimSpace(strings.TrimPrefix(message.Text, "/ask"))
-	if strings.HasPrefix(question, "@") {
-		if idx := strings.Index(question, " "); idx != -1 {
-			question = strings.TrimSpace(question[idx:])
-		} else {
-			question = ""
-		}
-	}
-
-	if question == "" {
-		b.sendMessageInThread(ctx, message.Chat.ID,
-			"Использование: /ask <вопрос>\nПример: /ask Какие книги читали на этой неделе?\n\nПосле первого вопроса можно продолжать диалог. Любая /команда завершит сессию.",
-			message.MessageThreadID)
-		return
-	}
-
 	if b.llmClient == nil {
 		b.sendMessageInThread(ctx, message.Chat.ID,
 			"Функция /ask не настроена.",
@@ -412,20 +396,40 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 
 	history := []llm.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: question},
 	}
 
-	answer, err := b.llmClient.Chat(ctx, history)
-	if err != nil {
-		b.logger.Error("LLM request failed", zap.Error(err))
-		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при обращении к ИИ. Попробуйте позже.", message.MessageThreadID)
-		return
+	// Check if there's a question inline with the command
+	question := strings.TrimSpace(strings.TrimPrefix(message.Text, "/ask"))
+	if strings.HasPrefix(question, "@") {
+		if idx := strings.Index(question, " "); idx != -1 {
+			question = strings.TrimSpace(question[idx:])
+		} else {
+			question = ""
+		}
 	}
 
-	history = append(history, llm.Message{Role: "assistant", Content: answer})
-
-	// Enter conversation state for follow-ups
 	userID := message.From.ID
+
+	if question != "" {
+		// Inline question — answer immediately
+		history = append(history, llm.Message{Role: "user", Content: question})
+
+		answer, err := b.llmClient.Chat(ctx, history)
+		if err != nil {
+			b.logger.Error("LLM request failed", zap.Error(err))
+			b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при обращении к ИИ. Попробуйте позже.", message.MessageThreadID)
+			return
+		}
+
+		history = append(history, llm.Message{Role: "assistant", Content: answer})
+		b.sendAskResponse(ctx, message.Chat.ID, answer, message.MessageThreadID)
+	} else {
+		// No question — just enter interactive mode
+		b.sendMessageInThread(ctx, message.Chat.ID,
+			"🤖 Режим ИИ-ассистента. Задавайте вопросы о библиотеке. Любая /команда завершит сессию.",
+			message.MessageThreadID)
+	}
+
 	b.statesMu.Lock()
 	b.states[userID] = &ConversationState{
 		Command:         "ask",
@@ -434,8 +438,6 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 		MessageThreadID: message.MessageThreadID,
 	}
 	b.statesMu.Unlock()
-
-	b.sendAskResponse(ctx, message.Chat.ID, answer, message.MessageThreadID)
 }
 
 // buildAskContext fetches library data and builds the system prompt.
