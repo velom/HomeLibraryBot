@@ -4,6 +4,7 @@ import (
 	"context"
 	"library/internal/models"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -263,6 +264,36 @@ func (m *MockDB) GetLastEvents(ctx context.Context, limit int) ([]models.Event, 
 	}
 
 	return sortedEvents[:limit], nil
+}
+
+func (m *MockDB) GetLastEventsFiltered(ctx context.Context, limit int, since, until time.Time, participant string) ([]models.Event, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sortedEvents := make([]models.Event, len(m.events))
+	copy(sortedEvents, m.events)
+	sort.Slice(sortedEvents, func(i, j int) bool {
+		return sortedEvents[i].Date.After(sortedEvents[j].Date)
+	})
+
+	var filtered []models.Event
+	for _, e := range sortedEvents {
+		if !since.IsZero() && e.Date.Before(since) {
+			continue
+		}
+		if !until.IsZero() && e.Date.After(until) {
+			continue
+		}
+		if participant != "" && !strings.EqualFold(strings.TrimSpace(e.ParticipantName), strings.TrimSpace(participant)) {
+			continue
+		}
+		filtered = append(filtered, e)
+		if len(filtered) >= limit {
+			break
+		}
+	}
+
+	return filtered, nil
 }
 
 // GetTopBooks returns top N books by read count within the specified time period

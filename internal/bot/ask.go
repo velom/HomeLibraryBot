@@ -10,7 +10,6 @@ import (
 	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
 	"library/internal/llm"
-	appmodels "library/internal/models"
 )
 
 const askSystemPrompt = `Ты — помощник семейной библиотеки. Отвечай на русском языке. Будь кратким и точным.
@@ -277,50 +276,34 @@ func (b *Bot) toolGetParticipants(ctx context.Context) string {
 }
 
 func (b *Bot) toolGetLastEvents(ctx context.Context, limit int, since, until, participant string) string {
-	// Fetch more than needed if we'll filter, to ensure enough results after filtering
-	fetchLimit := limit
-	if since != "" || until != "" || participant != "" {
-		fetchLimit = limit * 5
-		if fetchLimit > 500 {
-			fetchLimit = 500
-		}
-	}
-
-	events, err := b.db.GetLastEvents(ctx, fetchLimit)
-	if err != nil {
-		return fmt.Sprintf("error: %v", err)
-	}
-
-	// Apply filters
 	var sinceDate, untilDate time.Time
 	if since != "" {
-		sinceDate, _ = time.Parse("2006-01-02", since)
+		var err error
+		sinceDate, err = time.Parse("2006-01-02", since)
+		if err != nil {
+			return fmt.Sprintf("error: invalid 'since' date format %q, expected YYYY-MM-DD", since)
+		}
 	}
 	if until != "" {
-		untilDate, _ = time.Parse("2006-01-02", until)
+		var err error
+		untilDate, err = time.Parse("2006-01-02", until)
+		if err != nil {
+			return fmt.Sprintf("error: invalid 'until' date format %q, expected YYYY-MM-DD", until)
+		}
 		// Include the entire "until" day
 		untilDate = untilDate.Add(24*time.Hour - time.Second)
 	}
 
-	var sb strings.Builder
-	count := 0
-	for _, e := range events {
-		if since != "" && e.Date.Before(sinceDate) {
-			continue
-		}
-		if until != "" && e.Date.After(untilDate) {
-			continue
-		}
-		if participant != "" && e.ParticipantName != participant {
-			continue
-		}
-		count++
-		sb.WriteString(fmt.Sprintf("%d. %s | %s | %s\n", count, e.Date.Format("2006-01-02"), e.ParticipantName, e.BookName))
-		if count >= limit {
-			break
-		}
+	events, err := b.db.GetLastEventsFiltered(ctx, limit, sinceDate, untilDate, strings.TrimSpace(participant))
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
 	}
-	if count == 0 {
+
+	var sb strings.Builder
+	for i, e := range events {
+		sb.WriteString(fmt.Sprintf("%d. %s | %s | %s\n", i+1, e.Date.Format("2006-01-02"), e.ParticipantName, e.BookName))
+	}
+	if len(events) == 0 {
 		sb.WriteString("(нет событий за указанный период)\n")
 	}
 	return sb.String()
@@ -380,50 +363,6 @@ func (b *Bot) sendAskResponse(ctx context.Context, chatID int64, answer string, 
 		answer = string([]rune(answer)[:4093]) + "..."
 	}
 	b.sendMessageInThread(ctx, chatID, answer, threadID)
-}
-
-func buildAskSystemPrompt(books []appmodels.Book, participants []appmodels.Participant, events []appmodels.Event) string {
-	var sb strings.Builder
-
-	sb.WriteString("Ты — помощник семейной библиотеки. Отвечай на русском языке. Будь кратким и точным.\n")
-	sb.WriteString("Используй ТОЛЬКО предоставленные данные. Считай внимательно, проверяй даты.\n")
-	sb.WriteString("Если данных недостаточно для ответа, так и скажи.\n\n")
-	sb.WriteString(fmt.Sprintf("Сегодняшняя дата: %s\n\n", time.Now().Format("2006-01-02")))
-
-	sb.WriteString(fmt.Sprintf("== Книги (всего: %d) ==\n", len(books)))
-	for i, book := range books {
-		line := fmt.Sprintf("%d. %s", i+1, book.Name)
-		if len(book.Labels) > 0 {
-			line += fmt.Sprintf(" [метки: %s]", strings.Join(book.Labels, ", "))
-		}
-		sb.WriteString(line + "\n")
-	}
-	if len(books) == 0 {
-		sb.WriteString("(нет книг)\n")
-	}
-
-	sb.WriteString(fmt.Sprintf("\n== Участники (всего: %d) ==\n", len(participants)))
-	for i, p := range participants {
-		role := "ребёнок"
-		if p.IsParent {
-			role = "родитель"
-		}
-		sb.WriteString(fmt.Sprintf("%d. %s (%s)\n", i+1, p.Name, role))
-	}
-	if len(participants) == 0 {
-		sb.WriteString("(нет участников)\n")
-	}
-
-	sb.WriteString(fmt.Sprintf("\n== Последние события чтения (всего: %d) ==\n", len(events)))
-	sb.WriteString("Формат: №. ДАТА | КТО | КНИГА\n")
-	for i, e := range events {
-		sb.WriteString(fmt.Sprintf("%d. %s | %s | %s\n", i+1, e.Date.Format("2006-01-02"), e.ParticipantName, e.BookName))
-	}
-	if len(events) == 0 {
-		sb.WriteString("(нет событий)\n")
-	}
-
-	return sb.String()
 }
 
 // Helper functions for extracting typed args from JSON
