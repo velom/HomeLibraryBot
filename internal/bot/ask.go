@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
 	"library/internal/llm"
@@ -20,6 +21,11 @@ const askSystemPrompt = `Ты — помощник семейной библио
 - "Прошлая неделя" = последние 7 дней. "Этот месяц" = с 1-го числа текущего месяца. Решай сам.
 - Не придумывай данные — всегда запрашивай через инструменты.
 - Считай внимательно, проверяй даты.
+
+ФОРМАТИРОВАНИЕ:
+- Используй Telegram HTML: <b>жирный</b>, <i>курсив</i>, <code>код</code>
+- НЕ используй Markdown (**, *, #). Только HTML-теги.
+- Для списков используй простые переносы строк с тире или номерами
 
 Сегодняшняя дата: %s`
 
@@ -357,12 +363,32 @@ func (b *Bot) toolGetLabels(ctx context.Context) string {
 	return strings.Join(labels, ", ") + "\n"
 }
 
-// sendAskResponse sends an LLM answer, truncating if necessary for Telegram's limit.
+// sendAskResponse sends an LLM answer with HTML formatting, truncating if necessary.
 func (b *Bot) sendAskResponse(ctx context.Context, chatID int64, answer string, threadID int) {
+	if b.api == nil {
+		return
+	}
+
 	if len([]rune(answer)) > 4096 {
 		answer = string([]rune(answer)[:4093]) + "..."
 	}
-	b.sendMessageInThread(ctx, chatID, answer, threadID)
+
+	params := &tgbot.SendMessageParams{
+		ChatID:    chatID,
+		Text:      answer,
+		ParseMode: models.ParseModeHTML,
+	}
+	if threadID != 0 {
+		params.MessageThreadID = threadID
+	}
+
+	_, err := b.api.SendMessage(ctx, params)
+	if err != nil {
+		// If HTML parsing fails (malformed tags from LLM), retry without parse mode
+		b.logger.Warn("Failed to send HTML message, retrying as plain text", zap.Error(err))
+		params.ParseMode = ""
+		b.api.SendMessage(ctx, params)
+	}
 }
 
 // Helper functions for extracting typed args from JSON
