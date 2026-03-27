@@ -170,7 +170,7 @@ func (b *Bot) runAskWithTools(ctx context.Context, history []llm.Message) (strin
 
 		if !resp.HasToolCalls() {
 			// LLM returned a text answer
-			history = append(history, llm.Message{Role: "assistant", Content: resp.Content})
+			history = append(history, resp.AssistantMessage)
 			return resp.Content, history, nil
 		}
 
@@ -180,11 +180,8 @@ func (b *Bot) runAskWithTools(ctx context.Context, history []llm.Message) (strin
 			zap.Int("iteration", i+1),
 		)
 
-		// Append the assistant message with tool calls
-		history = append(history, llm.Message{
-			Role:      "assistant",
-			ToolCalls: resp.ToolCalls,
-		})
+		// Append the raw assistant message (preserves thought_signature for Gemini)
+		history = append(history, resp.AssistantMessage)
 
 		// Execute each tool and append results
 		for _, tc := range resp.ToolCalls {

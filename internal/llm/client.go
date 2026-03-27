@@ -42,11 +42,24 @@ func NewClient(cfg Config, logger *zap.Logger) *Client {
 }
 
 // Message represents a chat message in the OpenAI format.
+// For assistant messages with tool calls, RawJSON preserves the full original
+// response (including provider-specific fields like Gemini's thought_signature).
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Role       string          `json:"role"`
+	Content    string          `json:"content"`
+	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
+	RawJSON    json.RawMessage `json:"-"` // not serialized by default; used via custom MarshalJSON
+}
+
+// MarshalJSON uses RawJSON verbatim if set (for replaying assistant tool-call messages),
+// otherwise falls back to standard struct serialization.
+func (m Message) MarshalJSON() ([]byte, error) {
+	if m.RawJSON != nil {
+		return m.RawJSON, nil
+	}
+	type plain Message
+	return json.Marshal(plain(m))
 }
 
 // ToolCall represents a function call requested by the LLM.
@@ -77,8 +90,9 @@ type ToolFunction struct {
 
 // ChatResponse represents the LLM's response, which may be text or tool calls.
 type ChatResponse struct {
-	Content   string
-	ToolCalls []ToolCall
+	Content          string
+	ToolCalls        []ToolCall
+	AssistantMessage Message // Full assistant message to append to history (preserves raw JSON for providers like Gemini)
 }
 
 // HasToolCalls returns true if the response requests tool calls.
@@ -154,9 +168,19 @@ func (c *Client) ChatWithTools(ctx context.Context, messages []Message, tools []
 	}
 
 	msg := completion.Choices[0].Message
-	return &ChatResponse{
+
+	// Build an assistant Message that preserves the raw JSON (for Gemini thought_signature etc.)
+	assistantMsg := Message{
+		Role:      "assistant",
 		Content:   msg.Content,
 		ToolCalls: msg.ToolCalls,
+		RawJSON:   completion.Choices[0].RawMessage,
+	}
+
+	return &ChatResponse{
+		Content:          msg.Content,
+		ToolCalls:        msg.ToolCalls,
+		AssistantMessage: assistantMsg,
 	}, nil
 }
 
@@ -173,7 +197,24 @@ type responseMessage struct {
 }
 
 type choice struct {
-	Message responseMessage `json:"message"`
+	Message    responseMessage `json:"message"`
+	RawMessage json.RawMessage `json:"-"` // captured during unmarshal
+}
+
+// UnmarshalJSON captures the raw "message" JSON for verbatim replay.
+func (c *choice) UnmarshalJSON(data []byte) error {
+	// First unmarshal into a helper to get the raw message
+	var raw struct {
+		Message json.RawMessage `json:"message"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.RawMessage = raw.Message
+
+	// Then unmarshal the message into the typed struct
+	type plain choice
+	return json.Unmarshal(data, (*plain)(c))
 }
 
 type chatCompletionResponse struct {
