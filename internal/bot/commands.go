@@ -471,13 +471,14 @@ func (b *Bot) sendAskResponse(ctx context.Context, chatID int64, answer string, 
 func buildAskSystemPrompt(books []appmodels.Book, participants []appmodels.Participant, events []appmodels.Event) string {
 	var sb strings.Builder
 
-	sb.WriteString("Ты — помощник семейной библиотеки. Отвечай на русском языке. Будь кратким и полезным.\n")
-	sb.WriteString("Используй только предоставленные данные. Если данных недостаточно для ответа, так и скажи.\n\n")
+	sb.WriteString("Ты — помощник семейной библиотеки. Отвечай на русском языке. Будь кратким и точным.\n")
+	sb.WriteString("Используй ТОЛЬКО предоставленные данные. Считай внимательно, проверяй даты.\n")
+	sb.WriteString("Если данных недостаточно для ответа, так и скажи.\n\n")
 	sb.WriteString(fmt.Sprintf("Сегодняшняя дата: %s\n\n", time.Now().Format("2006-01-02")))
 
-	sb.WriteString("== Книги ==\n")
-	for _, book := range books {
-		line := book.Name
+	sb.WriteString(fmt.Sprintf("== Книги (всего: %d) ==\n", len(books)))
+	for i, book := range books {
+		line := fmt.Sprintf("%d. %s", i+1, book.Name)
 		if len(book.Labels) > 0 {
 			line += fmt.Sprintf(" [метки: %s]", strings.Join(book.Labels, ", "))
 		}
@@ -487,21 +488,22 @@ func buildAskSystemPrompt(books []appmodels.Book, participants []appmodels.Parti
 		sb.WriteString("(нет книг)\n")
 	}
 
-	sb.WriteString("\n== Участники ==\n")
-	for _, p := range participants {
+	sb.WriteString(fmt.Sprintf("\n== Участники (всего: %d) ==\n", len(participants)))
+	for i, p := range participants {
 		role := "ребёнок"
 		if p.IsParent {
 			role = "родитель"
 		}
-		sb.WriteString(fmt.Sprintf("%s (%s)\n", p.Name, role))
+		sb.WriteString(fmt.Sprintf("%d. %s (%s)\n", i+1, p.Name, role))
 	}
 	if len(participants) == 0 {
 		sb.WriteString("(нет участников)\n")
 	}
 
-	sb.WriteString("\n== Последние события (чтение) ==\n")
-	for _, e := range events {
-		sb.WriteString(fmt.Sprintf("%s — %s выбрал(а) \"%s\"\n", e.Date.Format("2006-01-02"), e.ParticipantName, e.BookName))
+	sb.WriteString(fmt.Sprintf("\n== Последние события чтения (всего: %d) ==\n", len(events)))
+	sb.WriteString("Формат: №. ДАТА | КТО | КНИГА\n")
+	for i, e := range events {
+		sb.WriteString(fmt.Sprintf("%d. %s | %s | %s\n", i+1, e.Date.Format("2006-01-02"), e.ParticipantName, e.BookName))
 	}
 	if len(events) == 0 {
 		sb.WriteString("(нет событий)\n")
