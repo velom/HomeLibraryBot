@@ -43,12 +43,17 @@ func NewClient(cfg Config, logger *zap.Logger) *Client {
 
 // Ask sends a system prompt + user message and returns the LLM's text response.
 func (c *Client) Ask(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+	return c.Chat(ctx, []Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userMessage},
+	})
+}
+
+// Chat sends a full message history and returns the LLM's text response.
+func (c *Client) Chat(ctx context.Context, messages []Message) (string, error) {
 	reqBody := chatCompletionRequest{
-		Model: c.model,
-		Messages: []message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userMessage},
-		},
+		Model:    c.model,
+		Messages: messages,
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -90,18 +95,19 @@ func (c *Client) Ask(ctx context.Context, systemPrompt, userMessage string) (str
 	return completion.Choices[0].Message.Content, nil
 }
 
-type message struct {
+// Message represents a chat Message with a role and content.
+type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
 type chatCompletionRequest struct {
 	Model    string    `json:"model"`
-	Messages []message `json:"messages"`
+	Messages []Message `json:"messages"`
 }
 
 type choice struct {
-	Message message `json:"message"`
+	Message Message `json:"message"`
 }
 
 type chatCompletionResponse struct {

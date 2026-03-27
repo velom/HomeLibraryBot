@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
+	"library/internal/llm"
 	appmodels "library/internal/models"
 )
 
@@ -377,7 +378,7 @@ func (b *Bot) handleAddLabelStart(ctx context.Context, message *models.Message) 
 	b.sendMessageInThread(ctx, message.Chat.ID, "🏷 Which label?", message.MessageThreadID)
 }
 
-// handleAsk handles the /ask command for natural language queries
+// handleAsk handles the /ask command — starts a conversational LLM session
 func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 	question := strings.TrimSpace(strings.TrimPrefix(message.Text, "/ask"))
 	if strings.HasPrefix(question, "@") {
@@ -390,7 +391,7 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 
 	if question == "" {
 		b.sendMessageInThread(ctx, message.Chat.ID,
-			"Использование: /ask <вопрос>\nПример: /ask Какие книги читали на этой неделе?",
+			"Использование: /ask <вопрос>\nПример: /ask Какие книги читали на этой неделе?\n\nПосле первого вопроса можно продолжать диалог. Любая /команда завершит сессию.",
 			message.MessageThreadID)
 		return
 	}
@@ -402,46 +403,67 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 		return
 	}
 
-	books, err := b.db.ListReadableBooks(ctx)
+	systemPrompt, err := b.buildAskContext(ctx)
 	if err != nil {
-		b.logger.Error("Failed to list books for /ask", zap.Error(err))
+		b.logger.Error("Failed to fetch data for /ask", zap.Error(err))
 		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при получении данных.", message.MessageThreadID)
 		return
 	}
 
-	participants, err := b.db.ListParticipants(ctx)
-	if err != nil {
-		b.logger.Error("Failed to list participants for /ask", zap.Error(err))
-		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при получении данных.", message.MessageThreadID)
-		return
+	history := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: question},
 	}
 
-	events, err := b.db.GetLastEvents(ctx, 50)
-	if err != nil {
-		b.logger.Error("Failed to get events for /ask", zap.Error(err))
-		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при получении данных.", message.MessageThreadID)
-		return
-	}
-
-	systemPrompt := buildAskSystemPrompt(books, participants, events)
-
-	b.logger.Info("Calling LLM for /ask",
-		zap.Int64("user_id", message.From.ID),
-		zap.String("question", question),
-	)
-
-	answer, err := b.llmClient.Ask(ctx, systemPrompt, question)
+	answer, err := b.llmClient.Chat(ctx, history)
 	if err != nil {
 		b.logger.Error("LLM request failed", zap.Error(err))
 		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при обращении к ИИ. Попробуйте позже.", message.MessageThreadID)
 		return
 	}
 
+	history = append(history, llm.Message{Role: "assistant", Content: answer})
+
+	// Enter conversation state for follow-ups
+	userID := message.From.ID
+	b.statesMu.Lock()
+	b.states[userID] = &ConversationState{
+		Command:         "ask",
+		Step:            1,
+		Data:            map[string]interface{}{"history": history},
+		MessageThreadID: message.MessageThreadID,
+	}
+	b.statesMu.Unlock()
+
+	b.sendAskResponse(ctx, message.Chat.ID, answer, message.MessageThreadID)
+}
+
+// buildAskContext fetches library data and builds the system prompt.
+func (b *Bot) buildAskContext(ctx context.Context) (string, error) {
+	books, err := b.db.ListReadableBooks(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	participants, err := b.db.ListParticipants(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	events, err := b.db.GetLastEvents(ctx, 50)
+	if err != nil {
+		return "", err
+	}
+
+	return buildAskSystemPrompt(books, participants, events), nil
+}
+
+// sendAskResponse sends an LLM answer, truncating if necessary for Telegram's limit.
+func (b *Bot) sendAskResponse(ctx context.Context, chatID int64, answer string, threadID int) {
 	if len([]rune(answer)) > 4096 {
 		answer = string([]rune(answer)[:4093]) + "..."
 	}
-
-	b.sendMessageInThread(ctx, message.Chat.ID, answer, message.MessageThreadID)
+	b.sendMessageInThread(ctx, chatID, answer, threadID)
 }
 
 func buildAskSystemPrompt(books []appmodels.Book, participants []appmodels.Participant, events []appmodels.Event) string {

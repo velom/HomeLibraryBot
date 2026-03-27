@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-telegram/bot/models"
+	"go.uber.org/zap"
+	"library/internal/llm"
 )
 
 // handleConversation processes multi-step conversations
@@ -23,6 +25,8 @@ func (b *Bot) handleConversation(ctx context.Context, message *models.Message, s
 		b.handleStatsConversation(ctx, message, state)
 	case "add_label":
 		b.handleAddLabelConversation(ctx, message, state)
+	case "ask":
+		b.handleAskConversation(ctx, message, state)
 	}
 
 	// Clean up completed conversations
@@ -294,4 +298,34 @@ func (b *Bot) handleAddLabelConversation(ctx context.Context, message *models.Me
 		}
 		b.sendMessageInThreadWithMarkup(ctx, message.Chat.ID, "📚 Select a book:", state.MessageThreadID, keyboard)
 	}
+}
+
+// handleAskConversation handles follow-up messages in an /ask conversation
+func (b *Bot) handleAskConversation(ctx context.Context, message *models.Message, state *ConversationState) {
+	history, ok := state.Data["history"].([]llm.Message)
+	if !ok {
+		b.logger.Error("Invalid ask conversation state")
+		state.Step = -1
+		return
+	}
+
+	history = append(history, llm.Message{Role: "user", Content: message.Text})
+
+	b.logger.Info("Calling LLM for /ask follow-up",
+		zap.Int64("user_id", message.From.ID),
+		zap.String("question", message.Text),
+		zap.Int("history_len", len(history)),
+	)
+
+	answer, err := b.llmClient.Chat(ctx, history)
+	if err != nil {
+		b.logger.Error("LLM request failed", zap.Error(err))
+		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при обращении к ИИ. Попробуйте позже.", state.MessageThreadID)
+		return
+	}
+
+	history = append(history, llm.Message{Role: "assistant", Content: answer})
+	state.Data["history"] = history
+
+	b.sendAskResponse(ctx, message.Chat.ID, answer, state.MessageThreadID)
 }
