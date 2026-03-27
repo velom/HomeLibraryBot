@@ -46,9 +46,9 @@ var askTools = []llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "get_last_events",
-			Description: "Получить события чтения. Можно фильтровать по дате и участнику. Возвращает: дата, кто выбрал, какую книгу",
+			Description: "Получить события чтения. Можно фильтровать по дате и участнику. Возвращает: дата, кто выбрал, какую книгу. Для полного списка за период используй limit=100 с since/until",
 			Parameters: json.RawMessage(`{"type":"object","properties":{
-				"limit":{"type":"integer","description":"Количество событий (по умолчанию 20, максимум 100)"},
+				"limit":{"type":"integer","description":"Количество событий (по умолчанию 50, максимум 500)"},
 				"since":{"type":"string","description":"Дата начала в формате YYYY-MM-DD (только события с этой даты)"},
 				"until":{"type":"string","description":"Дата конца в формате YYYY-MM-DD (только события до этой даты включительно)"},
 				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все)"}
@@ -213,9 +213,9 @@ func (b *Bot) executeTool(ctx context.Context, name, argsJSON string) string {
 	case "get_participants":
 		return b.toolGetParticipants(ctx)
 	case "get_last_events":
-		limit := intArg(args, "limit", 20)
-		if limit > 100 {
-			limit = 100
+		limit := intArg(args, "limit", 50)
+		if limit > 500 {
+			limit = 500
 		}
 		since := stringArg(args, "since", "")
 		until := stringArg(args, "until", "")
