@@ -75,6 +75,7 @@ go vet ./...                         # Static analysis
 3. Add a "read" event: who from the family chose a book, which book, and which date (today by default).
 4. Reading statistics: top books, rarely-read books filtered by label, reading streaks.
 5. Reading rotation: children rotate alphabetically, parents interleave after last child.
+6. Natural language queries via /ask: ask questions about reading data in plain text, powered by LLM with tool-calling.
 
 ## Database Migrations
 
@@ -99,6 +100,7 @@ The app serves two interfaces simultaneously:
 - **`internal/app/`** - Application lifecycle: initializes DB, bot, HTTP server; handles graceful shutdown on SIGINT/SIGTERM
 - **`internal/bot/`** - Telegram bot + HTTP server (see file breakdown below)
 - **`internal/config/`** - Loads all config from environment variables via `godotenv`
+- **`internal/llm/`** - LLM client for OpenAI-compatible APIs (used by /ask command)
 - **`internal/storage/`** - Storage interface + ClickHouse implementation (`ch/`) + in-memory mock (`stubs/`)
 - **`internal/models/`** - Domain types: Book (with Labels), Participant, Event, BookStat, RareBookStat
 
@@ -110,7 +112,8 @@ The app serves two interfaces simultaneously:
 | `constructor.go` | NewBot with notification config |
 | `lifecycle.go` | Start (polling), StartWebhook, HandleWebhookUpdate |
 | `handlers.go` | Top-level message/callback dispatch |
-| `commands.go` | Command handlers: /start, /new_book, /read, /who_is_next, /last, /stats, /rare, /add_label |
+| `commands.go` | Command handlers: /start, /new_book, /read, /who_is_next, /last, /stats, /rare, /add_label, /book_labels, /books_by_label |
+| `ask.go` | /ask command: LLM-powered natural language queries about reading data |
 | `conversations.go` | Multi-step conversation state machine |
 | `callbacks.go` | Inline keyboard callback handlers |
 | `rotation.go` | ComputeNextParticipant algorithm (child/parent rotation) |
@@ -149,6 +152,10 @@ Environment variables (see `.env.example`):
 - `WEBHOOK_URL` - Required when webhook mode is enabled
 - `HTTP_PORT` - Mini App HTTP server port (default: 8081)
 - `NOTIFICATION_CHAT_ID` - Chat ID for event notifications (optional, 0 = disabled)
+- `NOTIFICATION_THREAD_ID` - Thread/topic ID for forum groups (optional)
+- `LLM_API_KEY` - API key for OpenAI-compatible LLM (optional, enables /ask command)
+- `LLM_BASE_URL` - LLM API base URL (default: Gemini API)
+- `LLM_MODEL` - LLM model name (default: gemini-2.0-flash)
 
 ### ClickHouse Type Safety
 

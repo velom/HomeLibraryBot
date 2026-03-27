@@ -69,7 +69,9 @@ jobs:
             WEBHOOK_MODE=true|\
             WEBHOOK_URL=${{ secrets.WEBHOOK_URL }}|\
             NOTIFICATION_CHAT_ID=${{ secrets.NOTIFICATION_CHAT_ID }}|\
-            NOTIFICATION_THREAD_ID=${{ secrets.NOTIFICATION_THREAD_ID }}"
+            NOTIFICATION_THREAD_ID=${{ secrets.NOTIFICATION_THREAD_ID }}|\
+            LLM_API_KEY=${{ secrets.LLM_API_KEY }}|\
+            LLM_MODEL=${{ secrets.LLM_MODEL }}"
 
       - name: Deployment summary
         run: |
