@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-telegram/bot"
 	"go.uber.org/zap"
+	"library/internal/llm"
 	"library/internal/storage"
 )
 
@@ -18,6 +19,7 @@ type Bot struct {
 	logger               *zap.Logger
 	notificationChatID   int64 // Chat ID to send notifications when events are created via web-app (0 = disabled)
 	notificationThreadID int   // Thread/topic ID for forum groups (0 = general/no topic)
+	llmClient            *llm.Client
 }
 
 // ConversationState tracks the state of multi-step commands

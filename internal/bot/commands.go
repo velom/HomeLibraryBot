@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
+	appmodels "library/internal/models"
 )
 
 // handleStart shows welcome message and available commands
@@ -22,7 +24,8 @@ Available commands:
 /rare - Show rarely read books
 /add_label - Add a label to a book
 /book_labels - Show labels for a book
-/books_by_label - Show books by label`
+/books_by_label - Show books by label
+/ask - Ask a question about your library (AI)`
 
 	b.sendMessageInThread(ctx, message.Chat.ID, text, message.MessageThreadID)
 }
@@ -372,4 +375,118 @@ func (b *Bot) handleAddLabelStart(ctx context.Context, message *models.Message) 
 	b.statesMu.Unlock()
 
 	b.sendMessageInThread(ctx, message.Chat.ID, "🏷 Which label?", message.MessageThreadID)
+}
+
+// handleAsk handles the /ask command for natural language queries
+func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
+	question := strings.TrimSpace(strings.TrimPrefix(message.Text, "/ask"))
+	if strings.HasPrefix(question, "@") {
+		if idx := strings.Index(question, " "); idx != -1 {
+			question = strings.TrimSpace(question[idx:])
+		} else {
+			question = ""
+		}
+	}
+
+	if question == "" {
+		b.sendMessageInThread(ctx, message.Chat.ID,
+			"Использование: /ask <вопрос>\nПример: /ask Какие книги читали на этой неделе?",
+			message.MessageThreadID)
+		return
+	}
+
+	if b.llmClient == nil {
+		b.sendMessageInThread(ctx, message.Chat.ID,
+			"Функция /ask не настроена.",
+			message.MessageThreadID)
+		return
+	}
+
+	books, err := b.db.ListReadableBooks(ctx)
+	if err != nil {
+		b.logger.Error("Failed to list books for /ask", zap.Error(err))
+		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при получении данных.", message.MessageThreadID)
+		return
+	}
+
+	participants, err := b.db.ListParticipants(ctx)
+	if err != nil {
+		b.logger.Error("Failed to list participants for /ask", zap.Error(err))
+		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при получении данных.", message.MessageThreadID)
+		return
+	}
+
+	events, err := b.db.GetLastEvents(ctx, 50)
+	if err != nil {
+		b.logger.Error("Failed to get events for /ask", zap.Error(err))
+		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при получении данных.", message.MessageThreadID)
+		return
+	}
+
+	systemPrompt := buildAskSystemPrompt(books, participants, events)
+
+	b.logger.Info("Calling LLM for /ask",
+		zap.Int64("user_id", message.From.ID),
+		zap.String("question", question),
+	)
+
+	answer, err := b.llmClient.Ask(ctx, systemPrompt, question)
+	if err != nil {
+		b.logger.Error("LLM request failed", zap.Error(err))
+		b.sendMessageInThread(ctx, message.Chat.ID, "Ошибка при обращении к ИИ. Попробуйте позже.", message.MessageThreadID)
+		return
+	}
+
+	if len(answer) > 4096 {
+		answer = answer[:4093] + "..."
+	}
+
+	b.sendMessageInThread(ctx, message.Chat.ID, answer, message.MessageThreadID)
+}
+
+func buildAskSystemPrompt(books []appmodels.Book, participants []appmodels.Participant, events []appmodels.Event) string {
+	var sb strings.Builder
+
+	sb.WriteString("Ты — помощник семейной библиотеки. Отвечай на русском языке. Будь кратким и полезным.\n")
+	sb.WriteString("Используй только предоставленные данные. Если данных недостаточно для ответа, так и скажи.\n\n")
+	sb.WriteString(fmt.Sprintf("Сегодняшняя дата: %s\n\n", time.Now().Format("2006-01-02")))
+
+	sb.WriteString("== Книги ==\n")
+	for _, book := range books {
+		line := book.Name
+		if len(book.Labels) > 0 {
+			line += fmt.Sprintf(" [метки: %s]", strings.Join(book.Labels, ", "))
+		}
+		if book.IsReadable {
+			line += " — доступна для чтения"
+		} else {
+			line += " — не доступна"
+		}
+		sb.WriteString(line + "\n")
+	}
+	if len(books) == 0 {
+		sb.WriteString("(нет книг)\n")
+	}
+
+	sb.WriteString("\n== Участники ==\n")
+	for _, p := range participants {
+		role := "ребёнок"
+		if p.IsParent {
+			role = "родитель"
+		}
+		sb.WriteString(fmt.Sprintf("%s (%s)\n", p.Name, role))
+	}
+	if len(participants) == 0 {
+		sb.WriteString("(нет участников)\n")
+	}
+
+	sb.WriteString("\n== Последние события (чтение) ==\n")
+	for _, e := range events {
+		sb.WriteString(fmt.Sprintf("%s — %s выбрал(а) \"%s\"\n", e.Date.Format("2006-01-02"), e.ParticipantName, e.BookName))
+	}
+	if len(events) == 0 {
+		sb.WriteString("(нет событий)\n")
+	}
+
+	return sb.String()
 }

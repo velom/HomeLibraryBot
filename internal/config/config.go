@@ -32,6 +32,11 @@ type Config struct {
 	ClickHouseUseTLS   bool
 
 	UseMockDB bool
+
+	// LLM configuration (optional)
+	LLMBaseURL string
+	LLMApiKey  string
+	LLMModel   string
 }
 
 // LoadFromEnv loads configuration from environment variables
@@ -135,6 +140,17 @@ func LoadFromEnv() (*Config, error) {
 		// Password is optional, can be empty
 
 		config.ClickHouseUseTLS = os.Getenv("CLICKHOUSE_USE_TLS") == "true"
+	}
+
+	// LLM configuration (optional)
+	config.LLMBaseURL = os.Getenv("LLM_BASE_URL")
+	if config.LLMBaseURL == "" {
+		config.LLMBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
+	}
+	config.LLMApiKey = os.Getenv("LLM_API_KEY")
+	config.LLMModel = os.Getenv("LLM_MODEL")
+	if config.LLMModel == "" {
+		config.LLMModel = "gemini-2.0-flash"
 	}
 
 	return config, nil
