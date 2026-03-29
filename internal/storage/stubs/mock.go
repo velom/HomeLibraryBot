@@ -460,6 +460,130 @@ func (m *MockDB) GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly
 	return stats, nil
 }
 
+func (m *MockDB) sortedParticipants() []models.Participant {
+	var participants []models.Participant
+	for _, p := range m.participants {
+		participants = append(participants, p)
+	}
+	sort.Slice(participants, func(i, j int) bool {
+		return participants[i].Name < participants[j].Name
+	})
+	return participants
+}
+
+func (m *MockDB) GetDetailedBookStats(ctx context.Context, startDate, endDate time.Time, bookName, participantName string) ([]models.DetailedBookStat, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	type key struct{ book, participant string }
+	counts := make(map[key]int)
+	lastDates := make(map[key]time.Time)
+
+	for _, event := range m.events {
+		if !startDate.IsZero() && event.Date.Before(startDate) {
+			continue
+		}
+		if !endDate.IsZero() && event.Date.After(endDate) {
+			continue
+		}
+		k := key{event.BookName, event.ParticipantName}
+		counts[k]++
+		if d, ok := lastDates[k]; !ok || event.Date.After(d) {
+			lastDates[k] = event.Date
+		}
+	}
+
+	var stats []models.DetailedBookStat
+	for _, book := range m.books {
+		if !book.IsReadable {
+			continue
+		}
+		if bookName != "" && book.Name != bookName {
+			continue
+		}
+		for _, p := range m.sortedParticipants() {
+			if participantName != "" && p.Name != participantName {
+				continue
+			}
+			k := key{book.Name, p.Name}
+			stat := models.DetailedBookStat{
+				BookName:        book.Name,
+				ParticipantName: p.Name,
+				ReadCount:       counts[k],
+			}
+			if d, ok := lastDates[k]; ok {
+				dateCopy := d
+				stat.LastReadDate = &dateCopy
+			}
+			stats = append(stats, stat)
+		}
+	}
+
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].BookName != stats[j].BookName {
+			return stats[i].BookName < stats[j].BookName
+		}
+		if stats[i].ReadCount != stats[j].ReadCount {
+			return stats[i].ReadCount > stats[j].ReadCount
+		}
+		return stats[i].ParticipantName < stats[j].ParticipantName
+	})
+
+	return stats, nil
+}
+
+func (m *MockDB) GetParticipantStats(ctx context.Context, startDate, endDate time.Time, bookName, participantName string) ([]models.ParticipantBookStat, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	type key struct{ participant, book string }
+	counts := make(map[key]int)
+
+	for _, event := range m.events {
+		if !startDate.IsZero() && event.Date.Before(startDate) {
+			continue
+		}
+		if !endDate.IsZero() && event.Date.After(endDate) {
+			continue
+		}
+		k := key{event.ParticipantName, event.BookName}
+		counts[k]++
+	}
+
+	var stats []models.ParticipantBookStat
+	for _, p := range m.sortedParticipants() {
+		if participantName != "" && p.Name != participantName {
+			continue
+		}
+		for _, book := range m.books {
+			if !book.IsReadable {
+				continue
+			}
+			if bookName != "" && book.Name != bookName {
+				continue
+			}
+			k := key{p.Name, book.Name}
+			stats = append(stats, models.ParticipantBookStat{
+				ParticipantName: p.Name,
+				BookName:        book.Name,
+				ReadCount:       counts[k],
+			})
+		}
+	}
+
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].ParticipantName != stats[j].ParticipantName {
+			return stats[i].ParticipantName < stats[j].ParticipantName
+		}
+		if stats[i].ReadCount != stats[j].ReadCount {
+			return stats[i].ReadCount > stats[j].ReadCount
+		}
+		return stats[i].BookName < stats[j].BookName
+	})
+
+	return stats, nil
+}
+
 // Close does nothing for mock DB
 func (m *MockDB) Close() error {
 	return nil

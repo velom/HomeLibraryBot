@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"strings"
 	"time"
 
 	"library/internal/models"
@@ -471,6 +472,144 @@ func (db *ClickHouseDB) GetRarelyReadBooks(ctx context.Context, limit int, child
 		})
 	}
 
+	return stats, nil
+}
+
+func (db *ClickHouseDB) GetDetailedBookStats(ctx context.Context, startDate, endDate time.Time, bookName, participantName string) ([]models.DetailedBookStat, error) {
+	var conditions []string
+	var joinConditions []string
+	var args []interface{}
+
+	conditions = append(conditions, "b.is_readable = true")
+
+	// Date filters go into JOIN condition to preserve zero counts in LEFT JOIN
+	if !startDate.IsZero() {
+		joinConditions = append(joinConditions, "e.date >= ?")
+		args = append(args, startDate)
+	}
+	if !endDate.IsZero() {
+		joinConditions = append(joinConditions, "e.date <= ?")
+		args = append(args, endDate)
+	}
+	// Entity filters go into WHERE
+	if bookName != "" {
+		conditions = append(conditions, "b.name = ?")
+		args = append(args, bookName)
+	}
+	if participantName != "" {
+		conditions = append(conditions, "p.name = ?")
+		args = append(args, participantName)
+	}
+
+	joinOn := "b.name = e.book_name AND p.name = e.participant_name"
+	if len(joinConditions) > 0 {
+		joinOn += " AND " + strings.Join(joinConditions, " AND ")
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			b.name AS book_name,
+			p.name AS participant_name,
+			toInt32(count(e.date)) AS read_count,
+			max(e.date) AS last_read_date
+		FROM books b
+		CROSS JOIN participants p
+		LEFT JOIN events e ON %s
+		WHERE %s
+		GROUP BY b.name, p.name
+		ORDER BY b.name ASC, read_count DESC, p.name ASC
+	`, joinOn, strings.Join(conditions, " AND "))
+
+	rows, err := db.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get detailed book stats: %w", err)
+	}
+	defer rows.Close()
+
+	epoch := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	var stats []models.DetailedBookStat
+	for rows.Next() {
+		var bName, pName string
+		var readCount int32
+		var lastReadDate time.Time
+		if err := rows.Scan(&bName, &pName, &readCount, &lastReadDate); err != nil {
+			return nil, fmt.Errorf("failed to scan detailed book stat: %w", err)
+		}
+		var lastReadPtr *time.Time
+		if lastReadDate.After(epoch) {
+			lastReadPtr = &lastReadDate
+		}
+		stats = append(stats, models.DetailedBookStat{
+			BookName:        bName,
+			ParticipantName: pName,
+			ReadCount:       int(readCount),
+			LastReadDate:    lastReadPtr,
+		})
+	}
+	return stats, nil
+}
+
+func (db *ClickHouseDB) GetParticipantStats(ctx context.Context, startDate, endDate time.Time, bookName, participantName string) ([]models.ParticipantBookStat, error) {
+	var conditions []string
+	var joinConditions []string
+	var args []interface{}
+
+	conditions = append(conditions, "b.is_readable = true")
+
+	if !startDate.IsZero() {
+		joinConditions = append(joinConditions, "e.date >= ?")
+		args = append(args, startDate)
+	}
+	if !endDate.IsZero() {
+		joinConditions = append(joinConditions, "e.date <= ?")
+		args = append(args, endDate)
+	}
+	if bookName != "" {
+		conditions = append(conditions, "b.name = ?")
+		args = append(args, bookName)
+	}
+	if participantName != "" {
+		conditions = append(conditions, "p.name = ?")
+		args = append(args, participantName)
+	}
+
+	joinOn := "p.name = e.participant_name AND b.name = e.book_name"
+	if len(joinConditions) > 0 {
+		joinOn += " AND " + strings.Join(joinConditions, " AND ")
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			p.name AS participant_name,
+			b.name AS book_name,
+			toInt32(count(e.date)) AS read_count
+		FROM participants p
+		CROSS JOIN books b
+		LEFT JOIN events e ON %s
+		WHERE %s
+		GROUP BY p.name, b.name
+		ORDER BY p.name ASC, read_count DESC, b.name ASC
+	`, joinOn, strings.Join(conditions, " AND "))
+
+	rows, err := db.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get participant stats: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []models.ParticipantBookStat
+	for rows.Next() {
+		var pName, bName string
+		var readCount int32
+		if err := rows.Scan(&pName, &bName, &readCount); err != nil {
+			return nil, fmt.Errorf("failed to scan participant stat: %w", err)
+		}
+		stats = append(stats, models.ParticipantBookStat{
+			ParticipantName: pName,
+			BookName:        bName,
+			ReadCount:       int(readCount),
+		})
+	}
 	return stats, nil
 }
 

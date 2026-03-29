@@ -92,6 +92,32 @@ var askTools = []llm.Tool{
 			Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
 		},
 	},
+	{
+		Type: "function",
+		Function: llm.ToolFunction{
+			Name:        "get_detailed_book_stats",
+			Description: "Получить детальную статистику по книгам: кто сколько раз прочитал каждую книгу и когда был последний раз. Возвращает все комбинации книга×участник, включая нулевые. Для общей картины вызывай без фильтров, для конкретной книги — с параметром book",
+			Parameters: json.RawMessage(`{"type":"object","properties":{
+				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
+				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD (по умолчанию: всё время)"},
+				"book":{"type":"string","description":"Название книги для фильтрации (по умолчанию: все книги)"},
+				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники)"}
+			}}`),
+		},
+	},
+	{
+		Type: "function",
+		Function: llm.ToolFunction{
+			Name:        "get_participant_stats",
+			Description: "Получить статистику в разрезе читающих: кто сколько каких книг прочитал. Возвращает все комбинации участник×книга, включая нулевые. Для конкретного участника — с параметром participant",
+			Parameters: json.RawMessage(`{"type":"object","properties":{
+				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
+				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD (по умолчанию: всё время)"},
+				"book":{"type":"string","description":"Название книги для фильтрации (по умолчанию: все книги)"},
+				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники)"}
+			}}`),
+		},
+	},
 }
 
 // handleAsk handles the /ask command — starts a conversational LLM session with tool use
@@ -238,6 +264,18 @@ func (b *Bot) executeTool(ctx context.Context, name, argsJSON string) string {
 		return b.toolGetRarelyReadBooks(ctx, label, limit)
 	case "get_labels":
 		return b.toolGetLabels(ctx)
+	case "get_detailed_book_stats":
+		since := stringArg(args, "since", "")
+		until := stringArg(args, "until", "")
+		book := stringArg(args, "book", "")
+		participant := stringArg(args, "participant", "")
+		return b.toolGetDetailedBookStats(ctx, since, until, book, participant)
+	case "get_participant_stats":
+		since := stringArg(args, "since", "")
+		until := stringArg(args, "until", "")
+		book := stringArg(args, "book", "")
+		participant := stringArg(args, "participant", "")
+		return b.toolGetParticipantStats(ctx, since, until, book, participant)
 	default:
 		return fmt.Sprintf("error: unknown tool %q", name)
 	}
@@ -282,22 +320,9 @@ func (b *Bot) toolGetParticipants(ctx context.Context) string {
 }
 
 func (b *Bot) toolGetLastEvents(ctx context.Context, limit int, since, until, participant string) string {
-	var sinceDate, untilDate time.Time
-	if since != "" {
-		var err error
-		sinceDate, err = time.Parse("2006-01-02", since)
-		if err != nil {
-			return fmt.Sprintf("error: invalid 'since' date format %q, expected YYYY-MM-DD", since)
-		}
-	}
-	if until != "" {
-		var err error
-		untilDate, err = time.Parse("2006-01-02", until)
-		if err != nil {
-			return fmt.Sprintf("error: invalid 'until' date format %q, expected YYYY-MM-DD", until)
-		}
-		// Include the entire "until" day
-		untilDate = untilDate.Add(24*time.Hour - time.Second)
+	sinceDate, untilDate, errStr := parseDateRange(since, until)
+	if errStr != "" {
+		return errStr
 	}
 
 	events, err := b.db.GetLastEventsFiltered(ctx, limit, sinceDate, untilDate, strings.TrimSpace(participant))
@@ -412,4 +437,92 @@ func stringArg(args map[string]any, key string, defaultVal string) string {
 		}
 	}
 	return defaultVal
+}
+
+func parseDateRange(since, until string) (sinceDate, untilDate time.Time, errStr string) {
+	if since != "" {
+		var err error
+		sinceDate, err = time.Parse("2006-01-02", since)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Sprintf("error: invalid 'since' date format %q, expected YYYY-MM-DD", since)
+		}
+	}
+	if until != "" {
+		var err error
+		untilDate, err = time.Parse("2006-01-02", until)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Sprintf("error: invalid 'until' date format %q, expected YYYY-MM-DD", until)
+		}
+		untilDate = untilDate.Add(24*time.Hour - time.Second)
+	}
+	return sinceDate, untilDate, ""
+}
+
+func (b *Bot) toolGetDetailedBookStats(ctx context.Context, since, until, book, participant string) string {
+	sinceDate, untilDate, errStr := parseDateRange(since, until)
+	if errStr != "" {
+		return errStr
+	}
+
+	stats, err := b.db.GetDetailedBookStats(ctx, sinceDate, untilDate, book, participant)
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+
+	if len(stats) == 0 {
+		return "(нет данных)\n"
+	}
+
+	var sb strings.Builder
+	currentBook := ""
+	for _, s := range stats {
+		if s.BookName != currentBook {
+			if currentBook != "" {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(fmt.Sprintf("📚 %s:\n", s.BookName))
+			currentBook = s.BookName
+		}
+		if s.LastReadDate != nil {
+			sb.WriteString(fmt.Sprintf("  %s — %d раз, последний: %s\n",
+				s.ParticipantName, s.ReadCount, s.LastReadDate.Format("2006-01-02")))
+		} else {
+			sb.WriteString(fmt.Sprintf("  %s — 0 раз\n", s.ParticipantName))
+		}
+	}
+	return sb.String()
+}
+
+func (b *Bot) toolGetParticipantStats(ctx context.Context, since, until, book, participant string) string {
+	sinceDate, untilDate, errStr := parseDateRange(since, until)
+	if errStr != "" {
+		return errStr
+	}
+
+	stats, err := b.db.GetParticipantStats(ctx, sinceDate, untilDate, book, participant)
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+
+	if len(stats) == 0 {
+		return "(нет данных)\n"
+	}
+
+	var sb strings.Builder
+	currentParticipant := ""
+	for _, s := range stats {
+		if s.ParticipantName != currentParticipant {
+			if currentParticipant != "" {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(fmt.Sprintf("👤 %s:\n", s.ParticipantName))
+			currentParticipant = s.ParticipantName
+		}
+		if s.ReadCount > 0 {
+			sb.WriteString(fmt.Sprintf("  %s — %d раз\n", s.BookName, s.ReadCount))
+		} else {
+			sb.WriteString(fmt.Sprintf("  %s — 0 раз\n", s.BookName))
+		}
+	}
+	return sb.String()
 }

@@ -230,6 +230,164 @@ func TestMockDB_GetBooksByLabel(t *testing.T) {
 	}
 }
 
+func TestMockDB_GetDetailedBookStats(t *testing.T) {
+	db := NewMockDB()
+	ctx := context.Background()
+	if err := db.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	now := time.Now()
+	_ = db.CreateEvent(ctx, now.AddDate(0, 0, -5), "The Hobbit", "Alice")
+	_ = db.CreateEvent(ctx, now.AddDate(0, 0, -2), "The Hobbit", "Alice")
+	_ = db.CreateEvent(ctx, now.AddDate(0, 0, -1), "The Hobbit", "Bob")
+
+	// All stats (no filters) — should have rows for every book × participant
+	stats, err := db.GetDetailedBookStats(ctx, time.Time{}, time.Time{}, "", "")
+	if err != nil {
+		t.Fatalf("Failed: %v", err)
+	}
+	participants, _ := db.ListParticipants(ctx)
+	books, _ := db.ListReadableBooks(ctx)
+	expectedRows := len(books) * len(participants)
+	if len(stats) != expectedRows {
+		t.Errorf("Expected %d rows (books×participants), got %d", expectedRows, len(stats))
+	}
+
+	// Alice + The Hobbit = 2 reads
+	for _, s := range stats {
+		if s.BookName == "The Hobbit" && s.ParticipantName == "Alice" {
+			if s.ReadCount != 2 {
+				t.Errorf("Expected Alice read The Hobbit 2 times, got %d", s.ReadCount)
+			}
+			if s.LastReadDate == nil {
+				t.Error("Expected non-nil LastReadDate")
+			}
+			break
+		}
+	}
+
+	// Filter by book
+	stats, err = db.GetDetailedBookStats(ctx, time.Time{}, time.Time{}, "The Hobbit", "")
+	if err != nil {
+		t.Fatalf("Failed: %v", err)
+	}
+	if len(stats) != len(participants) {
+		t.Errorf("Expected %d rows for one book, got %d", len(participants), len(stats))
+	}
+
+	// Filter by participant
+	stats, err = db.GetDetailedBookStats(ctx, time.Time{}, time.Time{}, "", "Alice")
+	if err != nil {
+		t.Fatalf("Failed: %v", err)
+	}
+	if len(stats) != len(books) {
+		t.Errorf("Expected %d rows for one participant, got %d", len(books), len(stats))
+	}
+
+	// Filter by date range (last 3 days only)
+	since := now.AddDate(0, 0, -3)
+	stats, err = db.GetDetailedBookStats(ctx, since, now, "The Hobbit", "Alice")
+	if err != nil {
+		t.Fatalf("Failed: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("Expected 1 row, got %d", len(stats))
+	}
+	if stats[0].ReadCount != 1 {
+		t.Errorf("Expected 1 read in last 3 days, got %d", stats[0].ReadCount)
+	}
+
+	// Zero-read entries exist
+	stats, err = db.GetDetailedBookStats(ctx, time.Time{}, time.Time{}, "The Hobbit", "")
+	if err != nil {
+		t.Fatalf("Failed: %v", err)
+	}
+	hasZero := false
+	for _, s := range stats {
+		if s.ReadCount == 0 {
+			hasZero = true
+			if s.LastReadDate != nil {
+				t.Error("Expected nil LastReadDate for zero-read entry")
+			}
+			break
+		}
+	}
+	if !hasZero {
+		t.Error("Expected at least one participant with 0 reads")
+	}
+}
+
+func TestMockDB_GetParticipantStats(t *testing.T) {
+	db := NewMockDB()
+	ctx := context.Background()
+	if err := db.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+
+	now := time.Now()
+	_ = db.CreateEvent(ctx, now.AddDate(0, 0, -5), "The Hobbit", "Alice")
+	_ = db.CreateEvent(ctx, now.AddDate(0, 0, -2), "The Hobbit", "Alice")
+	_ = db.CreateEvent(ctx, now.AddDate(0, 0, -1), "Goodnight Moon", "Alice")
+
+	// All stats
+	stats, err := db.GetParticipantStats(ctx, time.Time{}, time.Time{}, "", "")
+	if err != nil {
+		t.Fatalf("Failed: %v", err)
+	}
+	participants, _ := db.ListParticipants(ctx)
+	books, _ := db.ListReadableBooks(ctx)
+	if len(stats) != len(books)*len(participants) {
+		t.Errorf("Expected %d rows, got %d", len(books)*len(participants), len(stats))
+	}
+
+	// Alice + The Hobbit = 2
+	for _, s := range stats {
+		if s.ParticipantName == "Alice" && s.BookName == "The Hobbit" {
+			if s.ReadCount != 2 {
+				t.Errorf("Expected 2 reads, got %d", s.ReadCount)
+			}
+			break
+		}
+	}
+
+	// Filter by participant — ordered by read_count DESC within participant
+	stats, err = db.GetParticipantStats(ctx, time.Time{}, time.Time{}, "", "Alice")
+	if err != nil {
+		t.Fatalf("Failed: %v", err)
+	}
+	if len(stats) != len(books) {
+		t.Errorf("Expected %d rows for Alice, got %d", len(books), len(stats))
+	}
+	if len(stats) > 1 && stats[0].ReadCount < stats[1].ReadCount {
+		t.Error("Expected stats ordered by read_count DESC within participant")
+	}
+
+	// Date range filter
+	since := now.AddDate(0, 0, -3)
+	stats, err = db.GetParticipantStats(ctx, since, now, "", "Alice")
+	if err != nil {
+		t.Fatalf("Failed: %v", err)
+	}
+	for _, s := range stats {
+		if s.BookName == "The Hobbit" && s.ReadCount != 1 {
+			t.Errorf("Expected 1 read in last 3 days for The Hobbit, got %d", s.ReadCount)
+		}
+	}
+
+	// Zero reads present
+	hasZero := false
+	for _, s := range stats {
+		if s.ReadCount == 0 {
+			hasZero = true
+			break
+		}
+	}
+	if !hasZero {
+		t.Error("Expected zero-read entries")
+	}
+}
+
 func TestMockDB_GetLastEvents_Limit(t *testing.T) {
 	db := NewMockDB()
 	ctx := context.Background()
