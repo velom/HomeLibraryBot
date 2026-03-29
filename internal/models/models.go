@@ -34,3 +34,18 @@ type RareBookStat struct {
 	LastReadDate      *time.Time `json:"lastReadDate"` // nil if never read
 	DaysSinceLastRead int        `json:"daysSinceLastRead"` // -1 if never read
 }
+
+// DetailedBookStat represents per-participant reading statistics for a book
+type DetailedBookStat struct {
+	BookName        string     `json:"bookName"`
+	ParticipantName string     `json:"participantName"`
+	ReadCount       int        `json:"readCount"`
+	LastReadDate    *time.Time `json:"lastReadDate"` // nil if never read
+}
+
+// ParticipantBookStat represents per-book reading statistics for a participant
+type ParticipantBookStat struct {
+	ParticipantName string `json:"participantName"`
+	BookName        string `json:"bookName"`
+	ReadCount       int    `json:"readCount"`
+}

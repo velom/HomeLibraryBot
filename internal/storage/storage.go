@@ -42,6 +42,18 @@ type Storage interface {
 	// Books never read are included with DaysSinceLastRead=-1
 	GetRarelyReadBooks(ctx context.Context, limit int, childrenOnly bool, label string, excludeLabels []string) ([]models.RareBookStat, error)
 
+	// GetDetailedBookStats returns per-participant reading statistics for books.
+	// For each book × participant combination: read count and last read date.
+	// Zero-value times mean no date bound. Empty strings mean no filter.
+	// Results ordered by book_name ASC, read_count DESC, participant_name ASC.
+	GetDetailedBookStats(ctx context.Context, startDate, endDate time.Time, bookName, participantName string) ([]models.DetailedBookStat, error)
+
+	// GetParticipantStats returns per-book reading statistics for participants.
+	// For each participant × book combination: read count.
+	// Zero-value times mean no date bound. Empty strings mean no filter.
+	// Results ordered by participant_name ASC, read_count DESC, book_name ASC.
+	GetParticipantStats(ctx context.Context, startDate, endDate time.Time, bookName, participantName string) ([]models.ParticipantBookStat, error)
+
 	// Lifecycle
 	Initialize(ctx context.Context) error
 	Close() error
