@@ -2,6 +2,7 @@ package bot
 
 import (
 	"sync"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"go.uber.org/zap"
@@ -20,9 +21,10 @@ type Bot struct {
 	notificationChatID   int64 // Chat ID to send notifications when events are created via web-app (0 = disabled)
 	notificationThreadID int   // Thread/topic ID for forum groups (0 = general/no topic)
 	llmClient            *llm.Client
-	pendingBooks         map[string]*pendingBook // books submitted via Mini App awaiting Telegram approval
-	pendingBooksMu       sync.Mutex
-	pendingBookSeq       uint64 // monotonic source for pending-book ids
+	pendingBooks         map[string]*pendingBook  // books submitted via Mini App awaiting Telegram approval
+	pendingEvents        map[string]*pendingEvent // reading events submitted via Mini App awaiting Telegram approval
+	pendingMu            sync.Mutex               // guards both pending maps and the seq counter
+	pendingSeq           uint64                   // monotonic source for pending ids (shared by books and events)
 }
 
 // pendingBook is a book submitted via the Mini App awaiting Telegram approval.
@@ -30,6 +32,14 @@ type pendingBook struct {
 	Name        string
 	Labels      []string
 	RequestedBy string
+}
+
+// pendingEvent is a reading event submitted via the Mini App awaiting Telegram approval.
+type pendingEvent struct {
+	Date            time.Time
+	BookName        string
+	ParticipantName string
+	RequestedBy     string
 }
 
 // ConversationState tracks the state of multi-step commands

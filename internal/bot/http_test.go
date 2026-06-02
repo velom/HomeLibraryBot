@@ -31,6 +31,7 @@ func newTestHTTPServer(t *testing.T) (*HTTPServer, *stubs.MockDB) {
 		logger:             zap.NewNop(),
 		notificationChatID: 0,
 		pendingBooks:       make(map[string]*pendingBook),
+		pendingEvents:      make(map[string]*pendingEvent),
 	}
 	return &HTTPServer{bot: b, webhookMode: false}, mockDB
 }
@@ -179,6 +180,54 @@ func TestHandleCreateBook_NoNotificationChat_CreatesDirectly(t *testing.T) {
 		}
 	}
 	assert.True(t, found)
+}
+
+func TestHandleEvents_WithNotificationChat_Pending(t *testing.T) {
+	hs, mockDB := newTestHTTPServer(t)
+	hs.bot.notificationChatID = 999 // api is nil, so the approval message send is a guarded no-op
+
+	body := `{"date":"2026-03-23","book_name":"The Hobbit","participant_name":"Alice"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	hs.handleEvents(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "pending", resp["status"])
+
+	// Event must NOT be created yet — it is awaiting approval.
+	events, err := mockDB.GetLastEvents(nil, 10)
+	require.NoError(t, err)
+	assert.Empty(t, events)
+	assert.Len(t, hs.bot.pendingEvents, 1)
+}
+
+func TestHandleCreateBook_WithNotificationChat_Pending(t *testing.T) {
+	hs, mockDB := newTestHTTPServer(t)
+	hs.bot.notificationChatID = 999 // api is nil, so the approval message send is a guarded no-op
+
+	body := `{"name":"Pending Title","labels":["x"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/books", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	hs.handleCreateBook(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "pending", resp["status"])
+
+	// Book must NOT exist yet — it is awaiting approval.
+	books, err := mockDB.ListReadableBooks(nil)
+	require.NoError(t, err)
+	for _, bk := range books {
+		assert.NotEqual(t, "Pending Title", bk.Name)
+	}
+	assert.Len(t, hs.bot.pendingBooks, 1)
 }
 
 func TestHandleCreateBook_EmptyName(t *testing.T) {

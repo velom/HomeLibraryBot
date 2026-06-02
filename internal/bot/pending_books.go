@@ -9,18 +9,18 @@ import (
 
 // registerPendingBook stores a book awaiting approval and returns its short id.
 func (b *Bot) registerPendingBook(name string, labels []string, requestedBy string) string {
-	b.pendingBooksMu.Lock()
-	defer b.pendingBooksMu.Unlock()
-	b.pendingBookSeq++
-	id := strconv.FormatUint(b.pendingBookSeq, 10)
+	b.pendingMu.Lock()
+	defer b.pendingMu.Unlock()
+	b.pendingSeq++
+	id := strconv.FormatUint(b.pendingSeq, 10)
 	b.pendingBooks[id] = &pendingBook{Name: name, Labels: labels, RequestedBy: requestedBy}
 	return id
 }
 
 // popPendingBook removes and returns the pending book for id.
 func (b *Bot) popPendingBook(id string) (*pendingBook, bool) {
-	b.pendingBooksMu.Lock()
-	defer b.pendingBooksMu.Unlock()
+	b.pendingMu.Lock()
+	defer b.pendingMu.Unlock()
 	pb, ok := b.pendingBooks[id]
 	if ok {
 		delete(b.pendingBooks, id)

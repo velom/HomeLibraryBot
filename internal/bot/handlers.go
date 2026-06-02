@@ -169,6 +169,14 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 		b.handleBookRejectCallback(ctx, query)
 		return
 	}
+	if strings.HasPrefix(query.Data, "event_accept:") {
+		b.handleEventAcceptCallback(ctx, query)
+		return
+	}
+	if strings.HasPrefix(query.Data, "event_reject:") {
+		b.handleEventRejectCallback(ctx, query)
+		return
+	}
 
 	// Check if user is in a conversation
 	b.statesMu.RLock()

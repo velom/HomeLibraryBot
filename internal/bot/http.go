@@ -285,9 +285,9 @@ func (hs *HTTPServer) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 
 // sendBookApprovalRequest posts an approval message with inline Approve/Reject buttons.
 func (b *Bot) sendBookApprovalRequest(ctx context.Context, id string) {
-	b.pendingBooksMu.Lock()
+	b.pendingMu.Lock()
 	pb, ok := b.pendingBooks[id]
-	b.pendingBooksMu.Unlock()
+	b.pendingMu.Unlock()
 	if !ok {
 		return
 	}
@@ -303,6 +303,29 @@ func (b *Bot) sendBookApprovalRequest(ctx context.Context, id string) {
 			{
 				{Text: "✅ Approve", CallbackData: "book_accept:" + id},
 				{Text: "❌ Reject", CallbackData: "book_reject:" + id},
+			},
+		},
+	}
+	b.sendMessageInThreadWithMarkup(ctx, b.notificationChatID, text, b.notificationThreadID, keyboard)
+}
+
+// sendEventApprovalRequest posts an approval message with inline Approve/Reject buttons for a reading event.
+func (b *Bot) sendEventApprovalRequest(ctx context.Context, id string) {
+	b.pendingMu.Lock()
+	pe, ok := b.pendingEvents[id]
+	b.pendingMu.Unlock()
+	if !ok {
+		return
+	}
+
+	text := fmt.Sprintf("📅 New reading event pending approval\n\nDate: %s\nBook: %s\nReader: %s\n\nApprove to record it.",
+		pe.Date.Format("2006-01-02"), pe.BookName, pe.ParticipantName)
+
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "✅ Approve", CallbackData: "event_accept:" + id},
+				{Text: "❌ Reject", CallbackData: "event_reject:" + id},
 			},
 		},
 	}
@@ -368,7 +391,18 @@ func (hs *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Create event
+		// Approval channel configured: register pending and ask for confirmation in chat.
+		if hs.bot.notificationChatID != 0 {
+			id := hs.bot.registerPendingEvent(date, req.BookName, req.ParticipantName, "Mini App")
+			hs.bot.sendEventApprovalRequest(r.Context(), id)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+			return
+		}
+
+		// No approval channel: create immediately (keeps local dev usable).
 		err = hs.bot.db.CreateEvent(r.Context(), date, req.BookName, req.ParticipantName)
 		if err != nil {
 			hs.bot.logger.Error("Failed to create event",
@@ -385,13 +419,6 @@ func (hs *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			zap.String("book", req.BookName),
 			zap.String("participant", req.ParticipantName),
 		)
-
-		// Send notification to configured chat
-		if hs.bot.notificationChatID != 0 {
-			notificationText := fmt.Sprintf("New reading event!\n\nDate: %s\nBook: %s\nReader: %s",
-				date.Format("2006-01-02"), req.BookName, req.ParticipantName)
-			hs.bot.sendMessageInThread(r.Context(), hs.bot.notificationChatID, notificationText, hs.bot.notificationThreadID)
-		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)

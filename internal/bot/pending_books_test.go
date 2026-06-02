@@ -16,12 +16,13 @@ func newTestBot(t *testing.T) (*Bot, *stubs.MockDB) {
 	mockDB := stubs.NewMockDB()
 	mockDB.Initialize(nil)
 	b := &Bot{
-		db:           mockDB,
-		allowedUsers: map[int64]bool{123: true},
-		states:       make(map[int64]*ConversationState),
-		statesMu:     sync.RWMutex{},
-		logger:       zap.NewNop(),
-		pendingBooks: make(map[string]*pendingBook),
+		db:            mockDB,
+		allowedUsers:  map[int64]bool{123: true},
+		states:        make(map[int64]*ConversationState),
+		statesMu:      sync.RWMutex{},
+		logger:        zap.NewNop(),
+		pendingBooks:  make(map[string]*pendingBook),
+		pendingEvents: make(map[string]*pendingEvent),
 	}
 	return b, mockDB
 }

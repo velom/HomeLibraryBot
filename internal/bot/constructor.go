@@ -28,6 +28,7 @@ func NewBot(token string, db storage.Storage, allowedUserIDs []int64, notificati
 		notificationThreadID: notificationThreadID,
 		llmClient:            llmClient,
 		pendingBooks:         make(map[string]*pendingBook),
+		pendingEvents:        make(map[string]*pendingEvent),
 	}
 
 	// Create bot with handlers

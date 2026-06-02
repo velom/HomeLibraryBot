@@ -543,8 +543,9 @@
             submitBtn.textContent = 'Adding...';
 
             try {
-                await createEvent(date, selectedBook.name, participantName);
-                showSuccess('Reading event added successfully!');
+                const result = await createEvent(date, selectedBook.name, participantName);
+                const pending = result && result.status === 'pending';
+                showSuccess(pending ? 'Sent for approval ✅' : 'Reading event added successfully!');
 
                 // Reset form
                 setTimeout(() => {
@@ -552,10 +553,13 @@
                     clearBookSelection();
                     datePicker.setDate('today');
 
-                    // Close Mini App after successful submission
-                    setTimeout(() => {
-                        tg.close();
-                    }, 1500);
+                    // Auto-close only on direct creation; when pending, keep the app open
+                    // so the user knows it still needs approval in the chat.
+                    if (!pending) {
+                        setTimeout(() => {
+                            tg.close();
+                        }, 1500);
+                    }
                 }, 1000);
             } catch (error) {
                 showError(error.message || 'Failed to add reading event');
