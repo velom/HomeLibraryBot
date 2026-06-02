@@ -30,6 +30,7 @@ func newTestHTTPServer(t *testing.T) (*HTTPServer, *stubs.MockDB) {
 		statesMu:           sync.RWMutex{},
 		logger:             zap.NewNop(),
 		notificationChatID: 0,
+		pendingBooks:       make(map[string]*pendingBook),
 	}
 	return &HTTPServer{bot: b, webhookMode: false}, mockDB
 }
@@ -151,6 +152,111 @@ func TestHandleEvents_WrongMethod(t *testing.T) {
 	hs.handleEvents(rec, req)
 
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+func TestHandleCreateBook_NoNotificationChat_CreatesDirectly(t *testing.T) {
+	hs, mockDB := newTestHTTPServer(t) // notificationChatID == 0
+
+	body := `{"name":"Brand New Book","labels":["sci-fi"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/books", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	hs.handleCreateBook(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "created", resp["status"])
+
+	books, err := mockDB.ListReadableBooks(nil)
+	require.NoError(t, err)
+	var found bool
+	for _, bk := range books {
+		if bk.Name == "Brand New Book" {
+			found = true
+			assert.Contains(t, bk.Labels, "sci-fi")
+		}
+	}
+	assert.True(t, found)
+}
+
+func TestHandleCreateBook_EmptyName(t *testing.T) {
+	hs, _ := newTestHTTPServer(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/books", bytes.NewBufferString(`{"name":""}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	hs.handleCreateBook(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandleBooks_WrongMethod(t *testing.T) {
+	hs, _ := newTestHTTPServer(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/books", nil)
+	rec := httptest.NewRecorder()
+
+	hs.handleBooks(rec, req) // dispatcher routes by method
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+func TestHandleLabels(t *testing.T) {
+	hs, mockDB := newTestHTTPServer(t)
+	require.NoError(t, mockDB.AddLabelToBook(nil, "The Hobbit", "sci-fi"))
+	require.NoError(t, mockDB.AddLabelToBook(nil, "Matilda", "fantasy"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/labels", nil)
+	rec := httptest.NewRecorder()
+
+	hs.handleLabels(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var labels []string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&labels))
+	assert.Contains(t, labels, "sci-fi")
+	assert.Contains(t, labels, "fantasy")
+}
+
+func TestHandleRare_Sections(t *testing.T) {
+	hs, _ := newTestHTTPServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/rare", nil)
+	rec := httptest.NewRecorder()
+
+	hs.handleRare(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		ChildrenBooks []models.RareBookStat `json:"childrenBooks"`
+		AllBooks      []models.RareBookStat `json:"allBooks"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.NotNil(t, resp.ChildrenBooks)
+	assert.NotNil(t, resp.AllBooks)
+}
+
+func TestHandleRare_ExcludesLabel(t *testing.T) {
+	hs, mockDB := newTestHTTPServer(t)
+	require.NoError(t, mockDB.AddLabelToBook(nil, "The Hobbit", "skip-me"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/rare?exclude=skip-me", nil)
+	rec := httptest.NewRecorder()
+
+	hs.handleRare(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		ChildrenBooks []models.RareBookStat `json:"childrenBooks"`
+		AllBooks      []models.RareBookStat `json:"allBooks"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	for _, s := range resp.AllBooks {
+		assert.NotEqual(t, "The Hobbit", s.BookName, "excluded label's book must not appear")
+	}
 }
 
 func TestHandleIndex(t *testing.T) {

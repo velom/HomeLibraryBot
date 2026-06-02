@@ -186,9 +186,44 @@
             color: var(--tg-theme-hint-color, #999);
             font-size: 14px;
         }
+
+        .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+        .tab-btn {
+            flex: 1; padding: 10px; font-size: 14px; font-weight: 600;
+            background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            color: var(--tg-theme-text-color, #000); border: none; border-radius: 8px; cursor: pointer;
+        }
+        .tab-btn.active {
+            background-color: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #fff);
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .secondary-btn {
+            background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            color: var(--tg-theme-text-color, #000);
+        }
+        .labels-panel {
+            display: none; margin-top: 8px; padding: 12px;
+            border: 1px solid var(--tg-theme-hint-color, #ccc); border-radius: 8px;
+            max-height: 240px; overflow-y: auto;
+        }
+        .labels-panel.visible { display: block; }
+        .labels-actions { display: flex; gap: 16px; margin-bottom: 8px; }
+        .label-check { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+        .label-check input { width: auto; }
+        .rare-section-title { font-weight: 600; margin: 16px 0 8px; }
+        .rare-item { padding: 6px 0; border-bottom: 1px solid var(--tg-theme-hint-color, #eee); font-size: 14px; }
     </style>
 </head>
 <body>
+    <div class="tabs">
+        <button type="button" class="tab-btn active" data-tab="event">📝 Event</button>
+        <button type="button" class="tab-btn" data-tab="book">➕ Book</button>
+        <button type="button" class="tab-btn" data-tab="rare">📚 Rare</button>
+    </div>
+
+    <section id="tab-event" class="tab-panel active">
     <h1>📚 Add Reading Event</h1>
 
     <form id="eventForm">
@@ -219,6 +254,40 @@
         <div id="error" class="error"></div>
         <div id="success" class="success"></div>
     </form>
+    </section>
+
+    <section id="tab-book" class="tab-panel">
+        <h1>➕ Add Book</h1>
+        <form id="bookForm">
+            <div class="form-group">
+                <label for="bookName">📖 Name</label>
+                <input type="text" id="bookName" placeholder="Book title" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="bookLabels">🏷 Labels (comma-separated, optional)</label>
+                <input type="text" id="bookLabels" placeholder="e.g. sci-fi, classic" autocomplete="off">
+            </div>
+            <button type="submit" id="bookSubmitBtn">Submit Book</button>
+            <div id="bookError" class="error"></div>
+            <div id="bookSuccess" class="success"></div>
+        </form>
+    </section>
+
+    <section id="tab-rare" class="tab-panel">
+        <h1>📚 Rarely Read Books</h1>
+        <div class="form-group">
+            <button type="button" id="labelsToggle" class="secondary-btn">🏷 Labels (all)</button>
+            <div id="labelsPanel" class="labels-panel">
+                <div class="labels-actions">
+                    <span class="clear-selection" id="labelsSelectAll">Select all</span>
+                    <span class="clear-selection" id="labelsClear">Clear</span>
+                </div>
+                <div id="labelsList"></div>
+            </div>
+        </div>
+        <div id="rareLoading" class="loading" style="display:none;">Loading…</div>
+        <div id="rareResults"></div>
+    </section>
 
     <script>
         // Dev mode: provide mock Telegram SDK when running outside Telegram.
@@ -516,6 +585,162 @@
             } catch (error) {
                 console.error('Initialization error:', error);
                 showError('Failed to initialize app');
+            }
+        }
+
+        // --- Tabs ---
+        let rareLoaded = false;
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+                btn.classList.add('active');
+                const tab = btn.dataset.tab;
+                document.getElementById('tab-' + tab).classList.add('active');
+                if (tab === 'rare' && !rareLoaded) { rareLoaded = true; initRare(); }
+            });
+        });
+
+        // --- Add Book ---
+        const bookForm = document.getElementById('bookForm');
+        const bookNameInput = document.getElementById('bookName');
+        const bookLabelsInput = document.getElementById('bookLabels');
+        const bookSubmitBtn = document.getElementById('bookSubmitBtn');
+        const bookErrorDiv = document.getElementById('bookError');
+        const bookSuccessDiv = document.getElementById('bookSuccess');
+
+        bookForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            bookErrorDiv.classList.remove('visible');
+            bookSuccessDiv.classList.remove('visible');
+            const name = bookNameInput.value.trim();
+            if (!name) {
+                bookErrorDiv.textContent = 'Please enter a book name';
+                bookErrorDiv.classList.add('visible');
+                return;
+            }
+            const labels = bookLabelsInput.value.split(',').map(s => s.trim()).filter(Boolean);
+            bookSubmitBtn.disabled = true;
+            bookSubmitBtn.textContent = 'Submitting…';
+            try {
+                const response = await fetch('/api/books', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `tma ${tg.initData}` },
+                    body: JSON.stringify({ name, labels })
+                });
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.error || 'Failed to submit book');
+                }
+                const data = await response.json();
+                bookSuccessDiv.textContent = data.status === 'pending'
+                    ? 'Sent for approval ✅' : 'Book added ✅';
+                bookSuccessDiv.classList.add('visible');
+                bookForm.reset();
+            } catch (err) {
+                bookErrorDiv.textContent = err.message || 'Failed to submit book';
+                bookErrorDiv.classList.add('visible');
+            } finally {
+                bookSubmitBtn.disabled = false;
+                bookSubmitBtn.textContent = 'Submit Book';
+            }
+        });
+
+        // --- Rare ---
+        const labelsToggle = document.getElementById('labelsToggle');
+        const labelsPanel = document.getElementById('labelsPanel');
+        const labelsList = document.getElementById('labelsList');
+        const labelsSelectAll = document.getElementById('labelsSelectAll');
+        const labelsClear = document.getElementById('labelsClear');
+        const rareResults = document.getElementById('rareResults');
+        const rareLoading = document.getElementById('rareLoading');
+        let allLabels = [];
+
+        labelsToggle.addEventListener('click', () => labelsPanel.classList.toggle('visible'));
+
+        function selectedLabels() {
+            return Array.from(labelsList.querySelectorAll('input:checked')).map(i => i.value);
+        }
+        function excludedLabels() {
+            return allLabels.filter(l => !selectedLabels().includes(l));
+        }
+        function updateLabelsToggleText() {
+            const sel = selectedLabels().length;
+            labelsToggle.textContent = sel === allLabels.length
+                ? '🏷 Labels (all)' : `🏷 Labels (${sel}/${allLabels.length})`;
+        }
+
+        async function initRare() {
+            try {
+                const resp = await fetch('/api/labels', { headers: { 'Authorization': `tma ${tg.initData}` } });
+                allLabels = (await resp.json()) || [];
+            } catch (e) { allLabels = []; }
+            labelsList.innerHTML = '';
+            allLabels.forEach(label => {
+                const wrap = document.createElement('label');
+                wrap.className = 'label-check';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox'; cb.value = label; cb.checked = true;
+                cb.addEventListener('change', () => { updateLabelsToggleText(); fetchRare(); });
+                const span = document.createElement('span');
+                span.textContent = label;
+                wrap.appendChild(cb); wrap.appendChild(span);
+                labelsList.appendChild(wrap);
+            });
+            updateLabelsToggleText();
+            fetchRare();
+        }
+
+        labelsSelectAll.addEventListener('click', () => {
+            labelsList.querySelectorAll('input').forEach(i => i.checked = true);
+            updateLabelsToggleText(); fetchRare();
+        });
+        labelsClear.addEventListener('click', () => {
+            labelsList.querySelectorAll('input').forEach(i => i.checked = false);
+            updateLabelsToggleText(); fetchRare();
+        });
+
+        function renderRareSection(title, items) {
+            let html = `<div class="rare-section-title">${title}</div>`;
+            if (!items || items.length === 0) {
+                html += '<div class="no-results">No data available</div>';
+                return html;
+            }
+            items.forEach((s, i) => {
+                let suffix;
+                if (s.daysSinceLastRead === -1) {
+                    suffix = ' (never read)';
+                } else {
+                    suffix = ` (${s.daysSinceLastRead} days ago, last: ${s.lastReadDate ? s.lastReadDate.slice(0,10) : ''})`;
+                }
+                html += `<div class="rare-item">${i + 1}. ${s.bookName}${suffix}</div>`;
+            });
+            return html;
+        }
+
+        let rareFetchController = null;
+        async function fetchRare() {
+            // Cancel any in-flight request so a slow earlier response can't overwrite a newer one.
+            if (rareFetchController) rareFetchController.abort();
+            rareFetchController = new AbortController();
+            const signal = rareFetchController.signal;
+
+            rareLoading.style.display = 'block';
+            rareResults.innerHTML = '';
+            try {
+                const params = excludedLabels().map(l => 'exclude=' + encodeURIComponent(l)).join('&');
+                const url = '/api/rare' + (params ? '?' + params : '');
+                const resp = await fetch(url, { signal, headers: { 'Authorization': `tma ${tg.initData}` } });
+                if (!resp.ok) throw new Error('Failed to load rare books');
+                const data = await resp.json();
+                rareResults.innerHTML =
+                    renderRareSection("👶 By children's choice", data.childrenBooks) +
+                    renderRareSection('📖 Overall (all participants)', data.allBooks);
+            } catch (e) {
+                if (e.name === 'AbortError') return; // superseded by a newer request
+                rareResults.innerHTML = '<div class="no-results">Failed to load</div>';
+            } finally {
+                rareLoading.style.display = 'none';
             }
         }
 

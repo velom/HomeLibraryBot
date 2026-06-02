@@ -160,6 +160,16 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 		CallbackQueryID: query.ID,
 	})
 
+	// Book-approval callbacks are not tied to a conversation state.
+	if strings.HasPrefix(query.Data, "book_accept:") {
+		b.handleBookAcceptCallback(ctx, query)
+		return
+	}
+	if strings.HasPrefix(query.Data, "book_reject:") {
+		b.handleBookRejectCallback(ctx, query)
+		return
+	}
+
 	// Check if user is in a conversation
 	b.statesMu.RLock()
 	state, ok := b.states[userID]
