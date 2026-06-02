@@ -9,6 +9,7 @@ import (
 
 	libmodels "library/internal/models"
 
+	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
 )
@@ -511,4 +512,80 @@ func (b *Bot) handleAddLabelBookCallback(ctx context.Context, query *models.Call
 		fmt.Sprintf("✅ Label '%s' added to book '%s'", label, selectedBook.Name),
 		state.MessageThreadID)
 	state.Step = -1 // Mark conversation as complete
+}
+
+// handleBookAcceptCallback approves a pending book: creates it and edits the message.
+func (b *Bot) handleBookAcceptCallback(ctx context.Context, query *models.CallbackQuery) {
+	id := strings.TrimPrefix(query.Data, "book_accept:")
+	name, ok, err := b.confirmPendingBook(ctx, id)
+	var text string
+	switch {
+	case !ok:
+		text = "⚠️ This request was already processed."
+	case err != nil:
+		b.logger.Error("Failed to create approved book", zap.Error(err), zap.String("book", name))
+		text = fmt.Sprintf("❌ Error creating \"%s\": %v", name, err)
+	default:
+		text = fmt.Sprintf("✅ Added: %s", name)
+	}
+	b.editCallbackMessage(ctx, query, text)
+}
+
+// handleBookRejectCallback discards a pending book and edits the message.
+func (b *Bot) handleBookRejectCallback(ctx context.Context, query *models.CallbackQuery) {
+	id := strings.TrimPrefix(query.Data, "book_reject:")
+	pb, ok := b.popPendingBook(id)
+	var text string
+	if !ok {
+		text = "⚠️ This request was already processed."
+	} else {
+		text = fmt.Sprintf("❌ Rejected: %s", pb.Name)
+	}
+	b.editCallbackMessage(ctx, query, text)
+}
+
+// handleEventAcceptCallback approves a pending reading event: records it and edits the message.
+func (b *Bot) handleEventAcceptCallback(ctx context.Context, query *models.CallbackQuery) {
+	id := strings.TrimPrefix(query.Data, "event_accept:")
+	pe, ok, err := b.confirmPendingEvent(ctx, id)
+	var text string
+	switch {
+	case !ok:
+		text = "⚠️ This request was already processed."
+	case err != nil:
+		b.logger.Error("Failed to create approved event", zap.Error(err),
+			zap.String("book", pe.BookName), zap.String("participant", pe.ParticipantName))
+		text = fmt.Sprintf("❌ Error recording event: %v", err)
+	default:
+		text = fmt.Sprintf("✅ Event recorded: %s — %s (%s)",
+			pe.BookName, pe.ParticipantName, pe.Date.Format("2006-01-02"))
+	}
+	b.editCallbackMessage(ctx, query, text)
+}
+
+// handleEventRejectCallback discards a pending reading event and edits the message.
+func (b *Bot) handleEventRejectCallback(ctx context.Context, query *models.CallbackQuery) {
+	id := strings.TrimPrefix(query.Data, "event_reject:")
+	pe, ok := b.popPendingEvent(id)
+	var text string
+	if !ok {
+		text = "⚠️ This request was already processed."
+	} else {
+		text = fmt.Sprintf("❌ Rejected event: %s — %s (%s)",
+			pe.BookName, pe.ParticipantName, pe.Date.Format("2006-01-02"))
+	}
+	b.editCallbackMessage(ctx, query, text)
+}
+
+// editCallbackMessage replaces the text of the message that carried the inline keyboard,
+// dropping the buttons.
+func (b *Bot) editCallbackMessage(ctx context.Context, query *models.CallbackQuery, text string) {
+	if b.api == nil || query.Message.Message == nil {
+		return
+	}
+	b.api.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+		ChatID:    query.Message.Message.Chat.ID,
+		MessageID: query.Message.Message.ID,
+		Text:      text,
+	})
 }

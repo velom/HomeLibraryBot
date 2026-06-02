@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,6 +13,9 @@ import (
 	"strings"
 	"time"
 
+	libmodels "library/internal/models"
+
+	"github.com/go-telegram/bot/models"
 	"go.uber.org/zap"
 	"library/web"
 )
@@ -41,6 +45,8 @@ func (hs *HTTPServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/books", hs.handleBooks)
 	mux.HandleFunc("/api/participants", hs.handleParticipants)
 	mux.HandleFunc("/api/events", hs.handleEvents)
+	mux.HandleFunc("/api/labels", hs.handleLabels)
+	mux.HandleFunc("/api/rare", hs.handleRare)
 }
 
 // handleIndex serves the Mini App HTML from embedded filesystem
@@ -192,14 +198,21 @@ func (hs *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// handleBooks returns the list of readable books
+// handleBooks routes GET (list) and POST (create) for /api/books.
 func (hs *HTTPServer) handleBooks(w http.ResponseWriter, r *http.Request) {
-	hs.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
-			return
-		}
+	switch r.Method {
+	case http.MethodGet:
+		hs.handleListBooks(w, r)
+	case http.MethodPost:
+		hs.handleCreateBook(w, r)
+	default:
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
 
+// handleListBooks returns the list of readable books.
+func (hs *HTTPServer) handleListBooks(w http.ResponseWriter, r *http.Request) {
+	hs.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		books, err := hs.bot.db.ListReadableBooks(r.Context())
 		if err != nil {
 			hs.bot.logger.Error("Failed to list books", zap.Error(err))
@@ -210,6 +223,113 @@ func (hs *HTTPServer) handleBooks(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(books)
 	})(w, r)
+}
+
+// CreateBookRequest is the body for POST /api/books.
+type CreateBookRequest struct {
+	Name   string   `json:"name"`
+	Labels []string `json:"labels"`
+}
+
+// handleCreateBook either creates a book directly (no notification chat configured)
+// or posts an approval message to the notification chat and registers it as pending.
+func (hs *HTTPServer) handleCreateBook(w http.ResponseWriter, r *http.Request) {
+	hs.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		var req CreateBookRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			hs.bot.logger.Warn("Failed to decode create-book body", zap.Error(err))
+			http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
+			return
+		}
+
+		req.Name = strings.TrimSpace(req.Name)
+		if req.Name == "" {
+			http.Error(w, `{"error":"Missing book name"}`, http.StatusBadRequest)
+			return
+		}
+
+		labels := make([]string, 0, len(req.Labels))
+		for _, l := range req.Labels {
+			if l = strings.TrimSpace(l); l != "" {
+				labels = append(labels, l)
+			}
+		}
+
+		// No approval channel: create immediately (keeps local dev usable).
+		if hs.bot.notificationChatID == 0 {
+			if _, err := hs.bot.db.CreateBook(r.Context(), req.Name); err != nil {
+				hs.bot.logger.Error("Failed to create book", zap.Error(err), zap.String("book", req.Name))
+				http.Error(w, `{"error":"Failed to create book"}`, http.StatusInternalServerError)
+				return
+			}
+			for _, l := range labels {
+				if err := hs.bot.db.AddLabelToBook(r.Context(), req.Name, l); err != nil {
+					hs.bot.logger.Error("Failed to add label", zap.Error(err), zap.String("book", req.Name), zap.String("label", l))
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]string{"status": "created"})
+			return
+		}
+
+		// Approval channel configured: register pending and ask for confirmation.
+		id := hs.bot.registerPendingBook(req.Name, labels, "Mini App")
+		hs.bot.sendBookApprovalRequest(r.Context(), id)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+	})(w, r)
+}
+
+// sendBookApprovalRequest posts an approval message with inline Approve/Reject buttons.
+func (b *Bot) sendBookApprovalRequest(ctx context.Context, id string) {
+	b.pendingMu.Lock()
+	pb, ok := b.pendingBooks[id]
+	b.pendingMu.Unlock()
+	if !ok {
+		return
+	}
+
+	text := fmt.Sprintf("📚 New book pending approval\n\nName: %s", pb.Name)
+	if len(pb.Labels) > 0 {
+		text += fmt.Sprintf("\nLabels: %s", strings.Join(pb.Labels, ", "))
+	}
+	text += "\n\nApprove to add it to the library."
+
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "✅ Approve", CallbackData: "book_accept:" + id},
+				{Text: "❌ Reject", CallbackData: "book_reject:" + id},
+			},
+		},
+	}
+	b.sendMessageInThreadWithMarkup(ctx, b.notificationChatID, text, b.notificationThreadID, keyboard)
+}
+
+// sendEventApprovalRequest posts an approval message with inline Approve/Reject buttons for a reading event.
+func (b *Bot) sendEventApprovalRequest(ctx context.Context, id string) {
+	b.pendingMu.Lock()
+	pe, ok := b.pendingEvents[id]
+	b.pendingMu.Unlock()
+	if !ok {
+		return
+	}
+
+	text := fmt.Sprintf("📅 New reading event pending approval\n\nDate: %s\nBook: %s\nReader: %s\n\nApprove to record it.",
+		pe.Date.Format("2006-01-02"), pe.BookName, pe.ParticipantName)
+
+	keyboard := &models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{
+			{
+				{Text: "✅ Approve", CallbackData: "event_accept:" + id},
+				{Text: "❌ Reject", CallbackData: "event_reject:" + id},
+			},
+		},
+	}
+	b.sendMessageInThreadWithMarkup(ctx, b.notificationChatID, text, b.notificationThreadID, keyboard)
 }
 
 // handleParticipants returns the list of participants
@@ -271,7 +391,18 @@ func (hs *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Create event
+		// Approval channel configured: register pending and ask for confirmation in chat.
+		if hs.bot.notificationChatID != 0 {
+			id := hs.bot.registerPendingEvent(date, req.BookName, req.ParticipantName, "Mini App")
+			hs.bot.sendEventApprovalRequest(r.Context(), id)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+			return
+		}
+
+		// No approval channel: create immediately (keeps local dev usable).
 		err = hs.bot.db.CreateEvent(r.Context(), date, req.BookName, req.ParticipantName)
 		if err != nil {
 			hs.bot.logger.Error("Failed to create event",
@@ -289,17 +420,77 @@ func (hs *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			zap.String("participant", req.ParticipantName),
 		)
 
-		// Send notification to configured chat
-		if hs.bot.notificationChatID != 0 {
-			notificationText := fmt.Sprintf("New reading event!\n\nDate: %s\nBook: %s\nReader: %s",
-				date.Format("2006-01-02"), req.BookName, req.ParticipantName)
-			hs.bot.sendMessageInThread(r.Context(), hs.bot.notificationChatID, notificationText, hs.bot.notificationThreadID)
-		}
-
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "success",
 		})
+	})(w, r)
+}
+
+// handleLabels returns all distinct labels in the library.
+func (hs *HTTPServer) handleLabels(w http.ResponseWriter, r *http.Request) {
+	hs.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		labels, err := hs.bot.db.GetAllLabels(r.Context())
+		if err != nil {
+			hs.bot.logger.Error("Failed to list labels", zap.Error(err))
+			http.Error(w, `{"error":"Failed to fetch labels"}`, http.StatusInternalServerError)
+			return
+		}
+		if labels == nil {
+			labels = []string{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(labels)
+	})(w, r)
+}
+
+// RareResponse is the body returned by GET /api/rare.
+type RareResponse struct {
+	ChildrenBooks []libmodels.RareBookStat `json:"childrenBooks"`
+	AllBooks      []libmodels.RareBookStat `json:"allBooks"`
+}
+
+// handleRare returns rarely-read books, excluding any labels passed via repeated ?exclude=.
+func (hs *HTTPServer) handleRare(w http.ResponseWriter, r *http.Request) {
+	hs.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+
+		var exclude []string
+		for _, l := range r.URL.Query()["exclude"] {
+			if l = strings.TrimSpace(l); l != "" {
+				exclude = append(exclude, l)
+			}
+		}
+
+		const limit = 10
+		children, err := hs.bot.db.GetRarelyReadBooks(r.Context(), limit, true, "", exclude)
+		if err != nil {
+			hs.bot.logger.Error("Failed to get rare books (children)", zap.Error(err))
+			http.Error(w, `{"error":"Failed to fetch rare books"}`, http.StatusInternalServerError)
+			return
+		}
+		all, err := hs.bot.db.GetRarelyReadBooks(r.Context(), limit, false, "", exclude)
+		if err != nil {
+			hs.bot.logger.Error("Failed to get rare books (all)", zap.Error(err))
+			http.Error(w, `{"error":"Failed to fetch rare books"}`, http.StatusInternalServerError)
+			return
+		}
+		if children == nil {
+			children = []libmodels.RareBookStat{}
+		}
+		if all == nil {
+			all = []libmodels.RareBookStat{}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(RareResponse{ChildrenBooks: children, AllBooks: all})
 	})(w, r)
 }
