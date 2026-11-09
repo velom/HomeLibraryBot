@@ -29,7 +29,7 @@ When receiving a task, follow this workflow:
 
 ## Project Overview
 
-This is a Go project named "library" using Go 1.25.
+This is a Go project named "library" using Go 1.26.
 It implements a home library management system with a Telegram bot UI, a Telegram Mini App (web interface), and ClickHouse for data storage.
 
 ### Binaries
