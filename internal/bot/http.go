@@ -59,7 +59,7 @@ func (hs *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// Read the embedded index.html
 	content, err := web.Content.ReadFile("index.html")
 	if err != nil {
-		hs.bot.logger.Error("Failed to read embedded index.html", zap.Error(err))
+		hs.bot.log(r.Context()).Error("Failed to read embedded index.html", zap.Error(err))
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -160,7 +160,7 @@ func (hs *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Skip authentication in polling mode (local development)
 		if !hs.webhookMode {
-			hs.bot.logger.Debug("Skipping authentication (polling mode)",
+			hs.bot.log(r.Context()).Debug("Skipping authentication (polling mode)",
 				zap.String("path", r.URL.Path),
 				zap.String("remote_addr", r.RemoteAddr),
 			)
@@ -171,7 +171,7 @@ func (hs *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Extract authorization header
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" || !strings.HasPrefix(authHeader, "tma ") {
-			hs.bot.logger.Warn("Missing or invalid authorization header")
+			hs.bot.log(r.Context()).Warn("Missing or invalid authorization header")
 			http.Error(w, `{"error":"Unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
@@ -181,7 +181,7 @@ func (hs *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Validate initData
 		userID, err := validateTelegramInitData(initData, hs.botToken, hs.bot.allowedUsers)
 		if err != nil {
-			hs.bot.logger.Warn("Failed to validate initData",
+			hs.bot.log(r.Context()).Warn("Failed to validate initData",
 				zap.Error(err),
 				zap.String("remote_addr", r.RemoteAddr),
 			)
@@ -189,7 +189,7 @@ func (hs *HTTPServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		hs.bot.logger.Debug("Authenticated request",
+		hs.bot.log(r.Context()).Debug("Authenticated request",
 			zap.Int64("user_id", userID),
 			zap.String("path", r.URL.Path),
 		)
@@ -215,7 +215,7 @@ func (hs *HTTPServer) handleListBooks(w http.ResponseWriter, r *http.Request) {
 	hs.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		books, err := hs.bot.db.ListReadableBooks(r.Context())
 		if err != nil {
-			hs.bot.logger.Error("Failed to list books", zap.Error(err))
+			hs.bot.log(r.Context()).Error("Failed to list books", zap.Error(err))
 			http.Error(w, `{"error":"Failed to fetch books"}`, http.StatusInternalServerError)
 			return
 		}
@@ -237,7 +237,7 @@ func (hs *HTTPServer) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 	hs.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		var req CreateBookRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			hs.bot.logger.Warn("Failed to decode create-book body", zap.Error(err))
+			hs.bot.log(r.Context()).Warn("Failed to decode create-book body", zap.Error(err))
 			http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
 			return
 		}
@@ -258,13 +258,13 @@ func (hs *HTTPServer) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 		// No approval channel: create immediately (keeps local dev usable).
 		if hs.bot.notificationChatID == 0 {
 			if _, err := hs.bot.db.CreateBook(r.Context(), req.Name); err != nil {
-				hs.bot.logger.Error("Failed to create book", zap.Error(err), zap.String("book", req.Name))
+				hs.bot.log(r.Context()).Error("Failed to create book", zap.Error(err), zap.String("book", req.Name))
 				http.Error(w, `{"error":"Failed to create book"}`, http.StatusInternalServerError)
 				return
 			}
 			for _, l := range labels {
 				if err := hs.bot.db.AddLabelToBook(r.Context(), req.Name, l); err != nil {
-					hs.bot.logger.Error("Failed to add label", zap.Error(err), zap.String("book", req.Name), zap.String("label", l))
+					hs.bot.log(r.Context()).Error("Failed to add label", zap.Error(err), zap.String("book", req.Name), zap.String("label", l))
 				}
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -342,7 +342,7 @@ func (hs *HTTPServer) handleParticipants(w http.ResponseWriter, r *http.Request)
 
 		participants, err := hs.bot.db.ListParticipants(r.Context())
 		if err != nil {
-			hs.bot.logger.Error("Failed to list participants", zap.Error(err))
+			hs.bot.log(r.Context()).Error("Failed to list participants", zap.Error(err))
 			http.Error(w, `{"error":"Failed to fetch participants"}`, http.StatusInternalServerError)
 			return
 		}
@@ -369,7 +369,7 @@ func (hs *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 		var req CreateEventRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			hs.bot.logger.Warn("Failed to decode request body", zap.Error(err))
+			hs.bot.log(r.Context()).Warn("Failed to decode request body", zap.Error(err))
 			http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
 			return
 		}
@@ -383,7 +383,7 @@ func (hs *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 		// Parse date
 		date, err := time.Parse("2006-01-02", req.Date)
 		if err != nil {
-			hs.bot.logger.Warn("Failed to parse date",
+			hs.bot.log(r.Context()).Warn("Failed to parse date",
 				zap.Error(err),
 				zap.String("date", req.Date),
 			)
@@ -405,7 +405,7 @@ func (hs *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 		// No approval channel: create immediately (keeps local dev usable).
 		err = hs.bot.db.CreateEvent(r.Context(), date, req.BookName, req.ParticipantName)
 		if err != nil {
-			hs.bot.logger.Error("Failed to create event",
+			hs.bot.log(r.Context()).Error("Failed to create event",
 				zap.Error(err),
 				zap.String("book", req.BookName),
 				zap.String("participant", req.ParticipantName),
@@ -414,7 +414,7 @@ func (hs *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		hs.bot.logger.Info("Event created via Mini App",
+		hs.bot.log(r.Context()).Info("Event created via Mini App",
 			zap.String("date", req.Date),
 			zap.String("book", req.BookName),
 			zap.String("participant", req.ParticipantName),
@@ -437,7 +437,7 @@ func (hs *HTTPServer) handleLabels(w http.ResponseWriter, r *http.Request) {
 		}
 		labels, err := hs.bot.db.GetAllLabels(r.Context())
 		if err != nil {
-			hs.bot.logger.Error("Failed to list labels", zap.Error(err))
+			hs.bot.log(r.Context()).Error("Failed to list labels", zap.Error(err))
 			http.Error(w, `{"error":"Failed to fetch labels"}`, http.StatusInternalServerError)
 			return
 		}
@@ -473,13 +473,13 @@ func (hs *HTTPServer) handleRare(w http.ResponseWriter, r *http.Request) {
 		const limit = 10
 		children, err := hs.bot.db.GetRarelyReadBooks(r.Context(), limit, true, "", exclude)
 		if err != nil {
-			hs.bot.logger.Error("Failed to get rare books (children)", zap.Error(err))
+			hs.bot.log(r.Context()).Error("Failed to get rare books (children)", zap.Error(err))
 			http.Error(w, `{"error":"Failed to fetch rare books"}`, http.StatusInternalServerError)
 			return
 		}
 		all, err := hs.bot.db.GetRarelyReadBooks(r.Context(), limit, false, "", exclude)
 		if err != nil {
-			hs.bot.logger.Error("Failed to get rare books (all)", zap.Error(err))
+			hs.bot.log(r.Context()).Error("Failed to get rare books (all)", zap.Error(err))
 			http.Error(w, `{"error":"Failed to fetch rare books"}`, http.StatusInternalServerError)
 			return
 		}

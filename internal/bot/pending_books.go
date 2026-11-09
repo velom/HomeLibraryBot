@@ -42,7 +42,7 @@ func (b *Bot) confirmPendingBook(ctx context.Context, id string) (string, bool, 
 	// approval message reports success rather than a misleading "failed to create".
 	for _, label := range pb.Labels {
 		if err := b.db.AddLabelToBook(ctx, pb.Name, label); err != nil {
-			b.logger.Error("Failed to add label to approved book",
+			b.log(ctx).Error("Failed to add label to approved book",
 				zap.String("book", pb.Name), zap.String("label", label), zap.Error(err))
 		}
 	}

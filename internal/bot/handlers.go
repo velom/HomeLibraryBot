@@ -14,7 +14,7 @@ func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 	// Recover from panics to prevent bot crashes
 	defer func() {
 		if r := recover(); r != nil {
-			b.logger.Error("Recovered from panic in handleMessage",
+			b.log(ctx).Error("Recovered from panic in handleMessage",
 				zap.Any("panic", r),
 				zap.Int64("user_id", message.From.ID),
 				zap.Int64("chat_id", message.Chat.ID),
@@ -28,7 +28,7 @@ func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 
 	// Check if user is authorized
 	if !b.allowedUsers[userID] {
-		b.logger.Warn("Unauthorized access attempt",
+		b.log(ctx).Warn("Unauthorized access attempt",
 			zap.Int64("user_id", userID),
 			zap.Int64("chat_id", message.Chat.ID),
 			zap.String("username", message.From.Username),
@@ -39,7 +39,7 @@ func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 
 	isCommand := len(message.Entities) > 0 && message.Entities[0].Type == models.MessageEntityTypeBotCommand && message.Entities[0].Offset == 0
 
-	b.logger.Debug("Received message",
+	b.log(ctx).Debug("Received message",
 		zap.Int64("user_id", userID),
 		zap.Int64("chat_id", message.Chat.ID),
 		zap.String("text", message.Text),
@@ -86,7 +86,7 @@ func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 			}
 		}
 
-		b.logger.Info("Processing command",
+		b.log(ctx).Info("Processing command",
 			zap.String("command", cmdText),
 			zap.Int64("user_id", userID),
 			zap.Int64("chat_id", message.Chat.ID),
@@ -116,7 +116,7 @@ func (b *Bot) handleMessage(ctx context.Context, message *models.Message) {
 		case "ask":
 			b.handleAsk(ctx, message)
 		default:
-			b.logger.Warn("Unknown command",
+			b.log(ctx).Warn("Unknown command",
 				zap.String("command", cmdText),
 				zap.Int64("user_id", userID),
 			)
@@ -130,7 +130,7 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 	// Recover from panics
 	defer func() {
 		if r := recover(); r != nil {
-			b.logger.Error("Recovered from panic in handleCallbackQuery",
+			b.log(ctx).Error("Recovered from panic in handleCallbackQuery",
 				zap.Any("panic", r),
 				zap.Int64("user_id", query.From.ID),
 				zap.String("callback_data", query.Data),
@@ -142,7 +142,7 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 
 	// Check if user is authorized
 	if !b.allowedUsers[userID] {
-		b.logger.Warn("Unauthorized callback query attempt",
+		b.log(ctx).Warn("Unauthorized callback query attempt",
 			zap.Int64("user_id", userID),
 			zap.String("username", query.From.Username),
 			zap.String("callback_data", query.Data),
@@ -150,7 +150,7 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 		return
 	}
 
-	b.logger.Debug("Received callback query",
+	b.log(ctx).Debug("Received callback query",
 		zap.Int64("user_id", userID),
 		zap.String("callback_data", query.Data),
 	)
@@ -184,7 +184,7 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 	b.statesMu.RUnlock()
 
 	if !ok {
-		b.logger.Debug("No conversation state for callback",
+		b.log(ctx).Debug("No conversation state for callback",
 			zap.Int64("user_id", userID),
 			zap.String("callback_data", query.Data),
 		)
@@ -214,7 +214,7 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 	} else if strings.HasPrefix(data, "booksbylabel:") {
 		b.handleBooksByLabelCallback(ctx, query, state)
 	} else {
-		b.logger.Warn("Unknown callback prefix",
+		b.log(ctx).Warn("Unknown callback prefix",
 			zap.String("callback_data", data),
 			zap.Int64("user_id", userID),
 		)
@@ -225,6 +225,6 @@ func (b *Bot) handleCallbackQuery(ctx context.Context, query *models.CallbackQue
 		b.statesMu.Lock()
 		delete(b.states, userID)
 		b.statesMu.Unlock()
-		b.logger.Debug("Conversation completed", zap.Int64("user_id", userID))
+		b.log(ctx).Debug("Conversation completed", zap.Int64("user_id", userID))
 	}
 }

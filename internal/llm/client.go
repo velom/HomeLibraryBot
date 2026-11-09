@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
 )
 
@@ -32,7 +33,8 @@ type Client struct {
 func NewClient(cfg Config, logger *zap.Logger) *Client {
 	return &Client{
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
 		baseURL: cfg.BaseURL,
 		apiKey:  cfg.APIKey,
