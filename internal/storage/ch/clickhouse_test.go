@@ -755,3 +755,54 @@ func TestClickHouseDB_Close(t *testing.T) {
 	err = db.Close()
 	assert.NoError(t, err)
 }
+
+// TestClickHouseDB_ParticipantAndDetailedStats_UnmatchedRowsCountZero guards against
+// ClickHouse LEFT JOIN filling unmatched rows with default values (join_use_nulls=0),
+// which made count(e.date) report 1 for books never read in the requested range.
+func TestClickHouseDB_ParticipantAndDetailedStats_UnmatchedRowsCountZero(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	for _, book := range []string{"Book A", "Book B", "Book C"} {
+		_, err := db.CreateBook(ctx, book)
+		require.NoError(t, err)
+	}
+	require.NoError(t, db.conn.Exec(ctx, `INSERT INTO participants (name, is_parent) VALUES (?, ?)`, "Dad", true))
+
+	old := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	recent := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	for _, e := range []struct {
+		date time.Time
+		book string
+	}{
+		{old, "Book B"},
+		{recent, "Book A"},
+		{recent.Add(time.Hour), "Book A"},
+	} {
+		require.NoError(t, db.conn.Exec(ctx,
+			`INSERT INTO events (date, book_name, participant_name) VALUES (?, ?, ?)`, e.date, e.book, "Dad"))
+	}
+
+	since := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	pStats, err := db.GetParticipantStats(ctx, since, time.Time{}, "", "Dad")
+	require.NoError(t, err)
+	pCounts := map[string]int{}
+	for _, s := range pStats {
+		pCounts[s.BookName] = s.ReadCount
+	}
+	assert.Equal(t, map[string]int{"Book A": 2, "Book B": 0, "Book C": 0}, pCounts)
+
+	dStats, err := db.GetDetailedBookStats(ctx, since, time.Time{}, "", "Dad")
+	require.NoError(t, err)
+	dCounts := map[string]int{}
+	for _, s := range dStats {
+		dCounts[s.BookName] = s.ReadCount
+		if s.ReadCount == 0 {
+			assert.Nil(t, s.LastReadDate, "book %s", s.BookName)
+		}
+	}
+	assert.Equal(t, map[string]int{"Book A": 2, "Book B": 0, "Book C": 0}, dCounts)
+}
