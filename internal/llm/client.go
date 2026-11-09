@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
 )
 
@@ -18,6 +19,13 @@ type Config struct {
 	BaseURL string
 	APIKey  string
 	Model   string
+	// Gateway marks BaseURL as the Langfuse AI Gateway (OpenAI route). The gateway records
+	// every call as a generation itself, so the client does not emit its own generation
+	// span; it forwards traceparent and langfuse-* headers so the gateway nests the
+	// generation inside the caller's trace.
+	Gateway bool
+	// Environment is the Langfuse environment of traces (e.g. production, development).
+	Environment string
 }
 
 // Client is a provider-agnostic LLM client using the OpenAI-compatible chat completions API.
@@ -26,6 +34,8 @@ type Client struct {
 	baseURL    string
 	apiKey     string
 	model      string
+	gateway    bool
+	env        string
 	logger     *zap.Logger
 }
 
@@ -33,15 +43,23 @@ type Client struct {
 func NewClient(cfg Config, logger *zap.Logger) *Client {
 	return &Client{
 		httpClient: &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Timeout: 30 * time.Second,
+			// No propagation: trace context must not leak to the LLM provider.
+			// Gateway mode injects traceparent explicitly (see injectTraceparent).
+			Transport: otelhttp.NewTransport(http.DefaultTransport,
+				otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator())),
 		},
 		baseURL: cfg.BaseURL,
 		apiKey:  cfg.APIKey,
 		model:   cfg.Model,
+		gateway: cfg.Gateway,
+		env:     cfg.Environment,
 		logger:  logger,
 	}
 }
+
+// Environment returns the configured Langfuse environment.
+func (c *Client) Environment() string { return c.env }
 
 // Message represents a chat message in the OpenAI format.
 // For assistant messages with tool calls, RawJSON preserves the full original
@@ -124,7 +142,27 @@ func (c *Client) Chat(ctx context.Context, messages []Message) (string, error) {
 }
 
 // ChatWithTools sends messages with optional tool definitions and returns a ChatResponse.
+// Each call is recorded as a Langfuse generation (unless the gateway records it).
 func (c *Client) ChatWithTools(ctx context.Context, messages []Message, tools []Tool) (*ChatResponse, error) {
+	var gen *Observation
+	if !c.gateway {
+		ctx, gen = startGeneration(ctx, c.model, messages, tools)
+		defer gen.End()
+	}
+	resp, completion, err := c.chat(ctx, messages, tools)
+	if err != nil {
+		gen.Fail(err)
+		return nil, err
+	}
+	gen.SetOutput(string(completion.Choices[0].RawMessage))
+	gen.setUsage(completion.Usage)
+	if completion.Model != "" {
+		gen.SetMetadata("response_model", completion.Model)
+	}
+	return resp, nil
+}
+
+func (c *Client) chat(ctx context.Context, messages []Message, tools []Tool) (*ChatResponse, *chatCompletionResponse, error) {
 	reqBody := chatCompletionRequest{
 		Model:    c.model,
 		Messages: messages,
@@ -135,38 +173,42 @@ func (c *Client) ChatWithTools(ctx context.Context, messages []Message, tools []
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("llm: marshal request: %w", err)
+		return nil, nil, fmt.Errorf("llm: marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(bodyBytes))
 	if err != nil {
-		return nil, fmt.Errorf("llm: create request: %w", err)
+		return nil, nil, fmt.Errorf("llm: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	if c.gateway {
+		injectTraceparent(ctx, req.Header)
+		traceAttrsFrom(ctx).setGatewayHeaders(req.Header)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("llm: do request: %w", err)
+		return nil, nil, fmt.Errorf("llm: do request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("llm: read response body: %w", err)
+		return nil, nil, fmt.Errorf("llm: read response body: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("llm: API error status %d: %s", resp.StatusCode, string(respBytes))
+		return nil, nil, fmt.Errorf("llm: API error status %d: %s", resp.StatusCode, string(respBytes))
 	}
 
 	var completion chatCompletionResponse
 	if err := json.Unmarshal(respBytes, &completion); err != nil {
-		return nil, fmt.Errorf("llm: unmarshal response: %w", err)
+		return nil, nil, fmt.Errorf("llm: unmarshal response: %w", err)
 	}
 
 	if len(completion.Choices) == 0 {
-		return nil, fmt.Errorf("llm: no choices in response")
+		return nil, nil, fmt.Errorf("llm: no choices in response")
 	}
 
 	msg := completion.Choices[0].Message
@@ -183,7 +225,7 @@ func (c *Client) ChatWithTools(ctx context.Context, messages []Message, tools []
 		Content:          msg.Content,
 		ToolCalls:        msg.ToolCalls,
 		AssistantMessage: assistantMsg,
-	}, nil
+	}, &completion, nil
 }
 
 type chatCompletionRequest struct {
@@ -220,5 +262,7 @@ func (c *choice) UnmarshalJSON(data []byte) error {
 }
 
 type chatCompletionResponse struct {
+	Model   string   `json:"model"`
 	Choices []choice `json:"choices"`
+	Usage   *usage   `json:"usage,omitempty"`
 }

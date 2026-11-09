@@ -57,7 +57,7 @@ func New() (*App, error) {
 		return nil, fmt.Errorf("failed to initialize telemetry: %w", err)
 	}
 	logger = telemetry.WrapLogger(logger)
-	logger.Info("Telemetry initialized", zap.Bool("otlp_export", telemetry.Enabled()))
+	logger.Info("Telemetry initialized", zap.Bool("otlp_export", telemetry.Enabled()), zap.Bool("langfuse_export", telemetry.LangfuseEnabled()))
 
 	// Load configuration from environment variables
 	cfg, err := config.LoadFromEnv()
@@ -144,13 +144,16 @@ func (a *App) initBot() error {
 	var llmClient *llm.Client
 	if a.config.LLMApiKey != "" {
 		llmClient = llm.NewClient(llm.Config{
-			BaseURL: a.config.LLMBaseURL,
-			APIKey:  a.config.LLMApiKey,
-			Model:   a.config.LLMModel,
+			BaseURL:     a.config.LLMBaseURL,
+			APIKey:      a.config.LLMApiKey,
+			Model:       a.config.LLMModel,
+			Gateway:     a.config.LLMLangfuseGateway,
+			Environment: a.config.LangfuseEnvironment,
 		}, a.logger)
 		a.logger.Info("LLM client initialized",
 			zap.String("base_url", a.config.LLMBaseURL),
 			zap.String("model", a.config.LLMModel),
+			zap.Bool("langfuse_gateway", a.config.LLMLangfuseGateway),
 		)
 	} else {
 		a.logger.Info("LLM client not configured (LLM_API_KEY not set)")

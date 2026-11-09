@@ -157,6 +157,8 @@ Environment variables (see `.env.example`):
 - `LLM_BASE_URL` - LLM API base URL (default: Gemini API)
 - `LLM_MODEL` - LLM model name (default: gemini-2.0-flash)
 - `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` - OpenTelemetry OTLP/HTTP export of traces, metrics, logs (`internal/telemetry/`). Export is off when the endpoint is unset. Use `telemetry.Logger(ctx, ...)` / `b.log(ctx)` so logs carry `trace_id`/`span_id`. Never log or trace Telegram API URLs (they contain the bot token).
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` (default `https://cloud.langfuse.com`), `LANGFUSE_TRACING_ENVIRONMENT` - Langfuse LLM tracing for /ask, exported over OTLP to `<base>/api/public/otel` independently of the OTLP backend. Only spans from scope `library/llm` (`telemetry.LangfuseScope`) go to Langfuse; create them via `llm.StartAgent` / `llm.StartTool` (generations are recorded by `llm.Client`). Observation names are referenced by Langfuse evaluators/dashboards — keep `answer-question`, `generate-response` and tool names stable.
+- `LLM_LANGFUSE_GATEWAY` - set `true` when `LLM_BASE_URL` points at the Langfuse AI Gateway (OpenAI route; OpenAI/Anthropic models only). The client then skips its own generation span and sends `traceparent` + `langfuse-*` headers instead.
 
 ### ClickHouse Type Safety
 
