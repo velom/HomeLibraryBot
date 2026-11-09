@@ -147,7 +147,7 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 		history = append(history, llm.Message{Role: "user", Content: question})
 		answer, newHistory, err := b.runAskWithTools(ctx, history)
 		if err != nil {
-			b.logger.Error("LLM request failed", zap.Error(err))
+			b.log(ctx).Error("LLM request failed", zap.Error(err))
 			b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Ошибка при обращении к ИИ: %v", err), message.MessageThreadID)
 			return
 		}
@@ -173,7 +173,7 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 func (b *Bot) handleAskConversation(ctx context.Context, message *models.Message, state *ConversationState) {
 	history, ok := state.Data["history"].([]llm.Message)
 	if !ok {
-		b.logger.Error("Invalid ask conversation state")
+		b.log(ctx).Error("Invalid ask conversation state")
 		state.Step = -1
 		return
 	}
@@ -182,7 +182,7 @@ func (b *Bot) handleAskConversation(ctx context.Context, message *models.Message
 
 	answer, newHistory, err := b.runAskWithTools(ctx, history)
 	if err != nil {
-		b.logger.Error("LLM request failed", zap.Error(err))
+		b.log(ctx).Error("LLM request failed", zap.Error(err))
 		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Ошибка при обращении к ИИ: %v", err), state.MessageThreadID)
 		return
 	}
@@ -206,7 +206,7 @@ func (b *Bot) runAskWithTools(ctx context.Context, history []llm.Message) (strin
 		}
 
 		// LLM wants to call tools — execute them
-		b.logger.Debug("LLM requested tool calls",
+		b.log(ctx).Debug("LLM requested tool calls",
 			zap.Int("count", len(resp.ToolCalls)),
 			zap.Int("iteration", i+1),
 		)
@@ -230,7 +230,7 @@ func (b *Bot) runAskWithTools(ctx context.Context, history []llm.Message) (strin
 
 // executeTool runs a tool by name and returns the result as a string.
 func (b *Bot) executeTool(ctx context.Context, name, argsJSON string) string {
-	b.logger.Debug("Executing tool", zap.String("name", name), zap.String("args", argsJSON))
+	b.log(ctx).Debug("Executing tool", zap.String("name", name), zap.String("args", argsJSON))
 
 	var args map[string]any
 	if argsJSON != "" {
@@ -414,7 +414,7 @@ func (b *Bot) sendAskResponse(ctx context.Context, chatID int64, answer string, 
 	_, err := b.api.SendMessage(ctx, params)
 	if err != nil {
 		// If HTML parsing fails (malformed tags from LLM), retry without parse mode
-		b.logger.Warn("Failed to send HTML message, retrying as plain text", zap.Error(err))
+		b.log(ctx).Warn("Failed to send HTML message, retrying as plain text", zap.Error(err))
 		params.ParseMode = ""
 		b.api.SendMessage(ctx, params)
 	}

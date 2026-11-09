@@ -53,7 +53,7 @@ func (b *Bot) handleDateCallback(ctx context.Context, query *models.CallbackQuer
 	// Get books and show selection
 	books, err := b.db.ListReadableBooks(ctx)
 	if err != nil {
-		b.logger.Error("Failed to list readable books in date callback",
+		b.log(ctx).Error("Failed to list readable books in date callback",
 			zap.Error(err),
 			zap.Int64("user_id", query.From.ID),
 		)
@@ -277,7 +277,7 @@ func (b *Bot) showParticipantSelectionForStats(ctx context.Context, chatID int64
 func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, startDate, endDate time.Time, periodLabel, participantName string, limit int, messageThreadID int) {
 	stats, err := b.db.GetTopBooks(ctx, limit, startDate, endDate, participantName)
 	if err != nil {
-		b.logger.Error("Failed to get top books for stats report",
+		b.log(ctx).Error("Failed to get top books for stats report",
 			zap.Error(err),
 			zap.Int64("chat_id", chatID),
 			zap.String("participant", participantName),
@@ -289,7 +289,7 @@ func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, star
 	}
 
 	if len(stats) == 0 {
-		b.logger.Info("No reading events found for stats period",
+		b.log(ctx).Info("No reading events found for stats period",
 			zap.Int64("chat_id", chatID),
 			zap.String("participant", participantName),
 			zap.Time("start_date", startDate),
@@ -299,7 +299,7 @@ func (b *Bot) generateAndSendStatsReport(ctx context.Context, chatID int64, star
 		return
 	}
 
-	b.logger.Info("Generated stats report",
+	b.log(ctx).Info("Generated stats report",
 		zap.Int("book_count", len(stats)),
 		zap.Int64("chat_id", chatID),
 		zap.String("participant", participantName),
@@ -340,7 +340,7 @@ func (b *Bot) handleRareLabelCallback(ctx context.Context, query *models.Callbac
 	// Get rarely read books by children
 	childrenStats, err := b.db.GetRarelyReadBooks(ctx, limit, true, label, excludeLabels)
 	if err != nil {
-		b.logger.Error("Failed to get rarely read books by children",
+		b.log(ctx).Error("Failed to get rarely read books by children",
 			zap.Error(err),
 			zap.Int64("user_id", query.From.ID),
 		)
@@ -352,7 +352,7 @@ func (b *Bot) handleRareLabelCallback(ctx context.Context, query *models.Callbac
 	// Get rarely read books by all participants
 	allStats, err := b.db.GetRarelyReadBooks(ctx, limit, false, label, excludeLabels)
 	if err != nil {
-		b.logger.Error("Failed to get rarely read books by all",
+		b.log(ctx).Error("Failed to get rarely read books by all",
 			zap.Error(err),
 			zap.Int64("user_id", query.From.ID),
 		)
@@ -443,7 +443,7 @@ func (b *Bot) handleBooksByLabelCallback(ctx context.Context, query *models.Call
 
 	books, err := b.db.GetBooksByLabel(ctx, label)
 	if err != nil {
-		b.logger.Error("Failed to get books by label",
+		b.log(ctx).Error("Failed to get books by label",
 			zap.Error(err),
 			zap.Int64("user_id", query.From.ID),
 			zap.String("label", label),
@@ -497,7 +497,7 @@ func (b *Bot) handleAddLabelBookCallback(ctx context.Context, query *models.Call
 	// Add label to book
 	err = b.db.AddLabelToBook(ctx, selectedBook.Name, label)
 	if err != nil {
-		b.logger.Error("Failed to add label to book",
+		b.log(ctx).Error("Failed to add label to book",
 			zap.Error(err),
 			zap.Int64("user_id", query.From.ID),
 			zap.String("book", selectedBook.Name),
@@ -523,7 +523,7 @@ func (b *Bot) handleBookAcceptCallback(ctx context.Context, query *models.Callba
 	case !ok:
 		text = "⚠️ This request was already processed."
 	case err != nil:
-		b.logger.Error("Failed to create approved book", zap.Error(err), zap.String("book", name))
+		b.log(ctx).Error("Failed to create approved book", zap.Error(err), zap.String("book", name))
 		text = fmt.Sprintf("❌ Error creating \"%s\": %v", name, err)
 	default:
 		text = fmt.Sprintf("✅ Added: %s", name)
@@ -553,7 +553,7 @@ func (b *Bot) handleEventAcceptCallback(ctx context.Context, query *models.Callb
 	case !ok:
 		text = "⚠️ This request was already processed."
 	case err != nil:
-		b.logger.Error("Failed to create approved event", zap.Error(err),
+		b.log(ctx).Error("Failed to create approved event", zap.Error(err),
 			zap.String("book", pe.BookName), zap.String("participant", pe.ParticipantName))
 		text = fmt.Sprintf("❌ Error recording event: %v", err)
 	default:

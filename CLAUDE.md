@@ -156,6 +156,7 @@ Environment variables (see `.env.example`):
 - `LLM_API_KEY` - API key for OpenAI-compatible LLM (optional, enables /ask command)
 - `LLM_BASE_URL` - LLM API base URL (default: Gemini API)
 - `LLM_MODEL` - LLM model name (default: gemini-2.0-flash)
+- `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` - OpenTelemetry OTLP/HTTP export of traces, metrics, logs (`internal/telemetry/`). Export is off when the endpoint is unset. Use `telemetry.Logger(ctx, ...)` / `b.log(ctx)` so logs carry `trace_id`/`span_id`. Never log or trace Telegram API URLs (they contain the bot token).
 
 ### ClickHouse Type Safety
 

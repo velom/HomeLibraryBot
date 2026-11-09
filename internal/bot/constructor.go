@@ -34,6 +34,7 @@ func NewBot(token string, db storage.Storage, allowedUserIDs []int64, notificati
 	// Create bot with handlers
 	opts := []bot.Option{
 		bot.WithDefaultHandler(botWrapper.handleUpdate),
+		bot.WithHTTPClient(telegramPollTimeout, newTelegramClient()),
 	}
 
 	api, err := bot.New(token, opts...)
@@ -57,6 +58,9 @@ func NewBot(token string, db storage.Storage, allowedUserIDs []int64, notificati
 
 // handleUpdate is the main update handler
 func (b *Bot) handleUpdate(ctx context.Context, api *bot.Bot, update *models.Update) {
+	ctx, span := startUpdateSpan(ctx, update)
+	defer span.End()
+
 	// Handle message updates
 	if update.Message != nil {
 		b.handleMessage(ctx, update.Message)

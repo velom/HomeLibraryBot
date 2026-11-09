@@ -51,7 +51,7 @@ func (b *Bot) handleReadStart(ctx context.Context, message *models.Message) {
 	// Get readable books
 	books, err := b.db.ListReadableBooks(ctx)
 	if err != nil {
-		b.logger.Error("Failed to list readable books",
+		b.log(ctx).Error("Failed to list readable books",
 			zap.Error(err),
 			zap.Int64("user_id", userID),
 		)
@@ -60,7 +60,7 @@ func (b *Bot) handleReadStart(ctx context.Context, message *models.Message) {
 	}
 
 	if len(books) == 0 {
-		b.logger.Info("No readable books available", zap.Int64("user_id", userID))
+		b.log(ctx).Info("No readable books available", zap.Int64("user_id", userID))
 		b.sendMessageInThread(ctx, message.Chat.ID, "No readable books available. Please add books first with /new_book", message.MessageThreadID)
 		return
 	}
@@ -98,7 +98,7 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *models.Message) {
 	// Get all participants
 	participants, err := b.db.ListParticipants(ctx)
 	if err != nil {
-		b.logger.Error("Failed to list participants",
+		b.log(ctx).Error("Failed to list participants",
 			zap.Error(err),
 			zap.Int64("user_id", message.From.ID),
 		)
@@ -107,7 +107,7 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *models.Message) {
 	}
 
 	if len(participants) == 0 {
-		b.logger.Warn("No participants found", zap.Int64("user_id", message.From.ID))
+		b.log(ctx).Warn("No participants found", zap.Int64("user_id", message.From.ID))
 		b.sendMessageInThread(ctx, message.Chat.ID, "No participants found in database", message.MessageThreadID)
 		return
 	}
@@ -115,7 +115,7 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *models.Message) {
 	// Get the last event to determine last reader
 	events, err := b.db.GetLastEvents(ctx, 1)
 	if err != nil {
-		b.logger.Error("Failed to get last events",
+		b.log(ctx).Error("Failed to get last events",
 			zap.Error(err),
 			zap.Int64("user_id", message.From.ID),
 		)
@@ -145,7 +145,7 @@ func (b *Bot) handleWhoIsNext(ctx context.Context, message *models.Message) {
 func (b *Bot) handleLast(ctx context.Context, message *models.Message) {
 	events, err := b.db.GetLastEvents(ctx, 10)
 	if err != nil {
-		b.logger.Error("Failed to get last events",
+		b.log(ctx).Error("Failed to get last events",
 			zap.Error(err),
 			zap.Int64("user_id", message.From.ID),
 		)
@@ -154,12 +154,12 @@ func (b *Bot) handleLast(ctx context.Context, message *models.Message) {
 	}
 
 	if len(events) == 0 {
-		b.logger.Info("No reading events found", zap.Int64("user_id", message.From.ID))
+		b.log(ctx).Info("No reading events found", zap.Int64("user_id", message.From.ID))
 		b.sendMessageInThread(ctx, message.Chat.ID, "No reading events recorded yet.", message.MessageThreadID)
 		return
 	}
 
-	b.logger.Info("Retrieved last events",
+	b.log(ctx).Info("Retrieved last events",
 		zap.Int("event_count", len(events)),
 		zap.Int64("user_id", message.From.ID),
 	)
@@ -217,7 +217,7 @@ func (b *Bot) handleRareStart(ctx context.Context, message *models.Message) {
 	// Get all available labels
 	labels, err := b.db.GetAllLabels(ctx)
 	if err != nil {
-		b.logger.Error("Failed to get labels",
+		b.log(ctx).Error("Failed to get labels",
 			zap.Error(err),
 			zap.Int64("user_id", userID),
 		)
@@ -264,7 +264,7 @@ func (b *Bot) handleBookLabelsStart(ctx context.Context, message *models.Message
 
 	books, err := b.db.ListReadableBooks(ctx)
 	if err != nil {
-		b.logger.Error("Failed to list readable books",
+		b.log(ctx).Error("Failed to list readable books",
 			zap.Error(err),
 			zap.Int64("user_id", userID),
 		)
@@ -314,7 +314,7 @@ func (b *Bot) handleBooksByLabelStart(ctx context.Context, message *models.Messa
 
 	labels, err := b.db.GetAllLabels(ctx)
 	if err != nil {
-		b.logger.Error("Failed to get labels",
+		b.log(ctx).Error("Failed to get labels",
 			zap.Error(err),
 			zap.Int64("user_id", userID),
 		)

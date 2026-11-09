@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/joho/godotenv"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
 
 	"library/internal/bot"
@@ -20,6 +22,8 @@ import (
 	"library/internal/storage"
 	"library/internal/storage/ch"
 	"library/internal/storage/stubs"
+	"library/internal/storage/traced"
+	"library/internal/telemetry"
 )
 
 // App represents the application
@@ -29,6 +33,8 @@ type App struct {
 	bot    *bot.Bot
 	server *http.Server
 	logger *zap.Logger
+
+	telemetryShutdown func(context.Context) error
 }
 
 // New creates and initializes a new application instance
@@ -44,6 +50,15 @@ func New() (*App, error) {
 		logger.Info("No .env file found, using system environment variables")
 	}
 
+	// Telemetry must be initialized before anything that creates spans or logs.
+	telemetryShutdown, err := telemetry.Setup(context.Background())
+	if err != nil {
+		logger.Error("Failed to initialize telemetry", zap.Error(err))
+		return nil, fmt.Errorf("failed to initialize telemetry: %w", err)
+	}
+	logger = telemetry.WrapLogger(logger)
+	logger.Info("Telemetry initialized", zap.Bool("otlp_export", telemetry.Enabled()))
+
 	// Load configuration from environment variables
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
@@ -52,8 +67,9 @@ func New() (*App, error) {
 	}
 
 	app := &App{
-		config: cfg,
-		logger: logger,
+		config:            cfg,
+		logger:            logger,
+		telemetryShutdown: telemetryShutdown,
 	}
 
 	logger.Info("Starting Home Library Bot...")
@@ -108,6 +124,8 @@ func (a *App) initDatabase() error {
 		}
 		db = clickhouseDB
 	}
+
+	db = traced.Wrap(db, "clickhouse")
 
 	// Initialize database schema and default data
 	ctx := context.Background()
@@ -200,8 +218,9 @@ func (a *App) initHTTPServer() {
 
 		a.logger.Debug("Received webhook update", zap.Int("update_id", int(update.ID)))
 
-		// Process update in background to respond quickly to Telegram
-		go a.bot.HandleWebhookUpdate(context.Background(), &update)
+		// Process update in background to respond quickly to Telegram;
+		// WithoutCancel keeps the trace context but detaches from the request lifetime.
+		go a.bot.HandleWebhookUpdate(context.WithoutCancel(r.Context()), &update)
 
 		w.WriteHeader(http.StatusOK)
 	})
@@ -217,8 +236,19 @@ func (a *App) initHTTPServer() {
 	)
 
 	a.server = &http.Server{
-		Addr:         ":" + port,
-		Handler:      mux,
+		Addr: ":" + port,
+		Handler: otelhttp.NewHandler(mux, "http.server",
+			otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+				// Use the route only for known paths to keep span names low-cardinality.
+				switch p := r.URL.Path; {
+				case p == "/", p == "/web-app", p == "/telegram-webhook", strings.HasPrefix(p, "/api/"):
+					return r.Method + " " + p
+				default:
+					return r.Method
+				}
+			}),
+			otelhttp.WithFilter(func(r *http.Request) bool { return r.URL.Path != "/health" }),
+		),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
@@ -286,15 +316,19 @@ func (a *App) Shutdown() error {
 	}
 
 	// Close database
-	if err := a.db.Close(); err != nil {
-		a.logger.Error("Error closing database", zap.Error(err))
-		// Sync logger before returning error
-		_ = a.logger.Sync()
-		return err
+	dbErr := a.db.Close()
+	if dbErr != nil {
+		a.logger.Error("Error closing database", zap.Error(dbErr))
+	} else {
+		a.logger.Info("Shutdown complete")
 	}
 
-	a.logger.Info("Shutdown complete")
-	// Sync logger to flush any buffered log entries
+	// Flush telemetry last so shutdown logs and spans are exported.
+	if a.telemetryShutdown != nil {
+		if err := a.telemetryShutdown(shutdownCtx); err != nil {
+			a.logger.Error("Telemetry shutdown error", zap.Error(err))
+		}
+	}
 	_ = a.logger.Sync()
-	return nil
+	return dbErr
 }

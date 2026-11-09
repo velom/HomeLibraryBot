@@ -71,7 +71,12 @@ jobs:
             NOTIFICATION_CHAT_ID=${{ secrets.NOTIFICATION_CHAT_ID }}|\
             NOTIFICATION_THREAD_ID=${{ secrets.NOTIFICATION_THREAD_ID }}|\
             LLM_API_KEY=${{ secrets.LLM_API_KEY }}|\
-            LLM_MODEL=${{ secrets.LLM_MODEL }}"
+            LLM_MODEL=${{ secrets.LLM_MODEL }}|\
+            OTEL_EXPORTER_OTLP_ENDPOINT=${{ secrets.CLICKSTACK_OTLP_ENDPOINT }}|\
+            OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf|\
+            OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer ${{ secrets.CLICKSTACK_API_KEY }}|\
+            OTEL_SERVICE_NAME=library|\
+            OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production"
 
       - name: Deployment summary
         run: |
