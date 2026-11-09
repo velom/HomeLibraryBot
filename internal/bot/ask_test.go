@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/stretchr/testify/assert"
@@ -154,4 +155,20 @@ func TestAskSessionPersistsAcrossTurns(t *testing.T) {
 		}
 	}
 	assert.Equal(t, []string{"ask-keep", "ask-keep"}, sessions)
+}
+
+func TestStatsToolsOmitUnreadBooks(t *testing.T) {
+	b, db := newTestBot(t)
+	ctx := context.Background()
+	require.NoError(t, db.CreateEvent(ctx, time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC), "The Hobbit", "Dad"))
+	require.NoError(t, db.CreateEvent(ctx, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), "Matilda", "Dad"))
+
+	out := b.toolGetParticipantStats(ctx, "2024-05-01", "", "", "Dad")
+	assert.Equal(t, "👤 Dad:\n  The Hobbit — 1 раз\n", out)
+
+	out = b.toolGetDetailedBookStats(ctx, "2024-05-01", "", "", "Dad")
+	assert.Equal(t, "📚 The Hobbit:\n  Dad — 1 раз, последний: 2024-06-01\n", out)
+
+	assert.Equal(t, "(нет данных)\n", b.toolGetParticipantStats(ctx, "2025-01-01", "", "", "Dad"))
+	assert.Equal(t, "(нет данных)\n", b.toolGetDetailedBookStats(ctx, "2025-01-01", "", "", "Dad"))
 }

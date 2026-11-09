@@ -510,7 +510,8 @@ func (db *ClickHouseDB) GetDetailedBookStats(ctx context.Context, startDate, end
 		SELECT
 			b.name AS book_name,
 			p.name AS participant_name,
-			toInt32(count(e.date)) AS read_count,
+			-- LEFT JOIN fills unmatched rows with defaults (not NULL), so count(e.col) would be 1
+			toInt32(countIf(e.book_name != '')) AS read_count,
 			max(e.date) AS last_read_date
 		FROM books b
 		CROSS JOIN participants p
@@ -582,7 +583,8 @@ func (db *ClickHouseDB) GetParticipantStats(ctx context.Context, startDate, endD
 		SELECT
 			p.name AS participant_name,
 			b.name AS book_name,
-			toInt32(count(e.date)) AS read_count
+			-- LEFT JOIN fills unmatched rows with defaults (not NULL), so count(e.col) would be 1
+			toInt32(countIf(e.book_name != '')) AS read_count
 		FROM participants p
 		CROSS JOIN books b
 		LEFT JOIN events e ON %s

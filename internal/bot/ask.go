@@ -119,7 +119,7 @@ var askTools = []llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "get_detailed_book_stats",
-			Description: "Получить детальную статистику по книгам: кто сколько раз прочитал каждую книгу и когда был последний раз. Возвращает все комбинации книга×участник, включая нулевые. Для общей картины вызывай без фильтров, для конкретной книги — с параметром book",
+			Description: "Получить детальную статистику по книгам: кто сколько раз прочитал каждую книгу и когда был последний раз. Возвращает только пары книга×участник с ненулевым числом прочтений за период; если ничего не прочитано — «(нет данных)». Для общей картины вызывай без фильтров, для конкретной книги — с параметром book",
 			Parameters: json.RawMessage(`{"type":"object","properties":{
 				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD (по умолчанию: всё время)"},
@@ -132,7 +132,7 @@ var askTools = []llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "get_participant_stats",
-			Description: "Получить статистику в разрезе читающих: кто сколько каких книг прочитал. Возвращает все комбинации участник×книга, включая нулевые. Для конкретного участника — с параметром participant",
+			Description: "Получить статистику в разрезе читающих: кто сколько каких книг прочитал. Возвращает только прочитанные за период книги (без нулевых); если ничего не прочитано — «(нет данных)». Для конкретного участника — с параметром participant",
 			Parameters: json.RawMessage(`{"type":"object","properties":{
 				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD (по умолчанию: всё время)"},
@@ -538,13 +538,12 @@ func (b *Bot) toolGetDetailedBookStats(ctx context.Context, since, until, book, 
 		return fmt.Sprintf("error: %v", err)
 	}
 
-	if len(stats) == 0 {
-		return "(нет данных)\n"
-	}
-
 	var sb strings.Builder
 	currentBook := ""
 	for _, s := range stats {
+		if s.ReadCount == 0 || s.LastReadDate == nil {
+			continue
+		}
 		if s.BookName != currentBook {
 			if currentBook != "" {
 				sb.WriteString("\n")
@@ -552,12 +551,11 @@ func (b *Bot) toolGetDetailedBookStats(ctx context.Context, since, until, book, 
 			sb.WriteString(fmt.Sprintf("📚 %s:\n", s.BookName))
 			currentBook = s.BookName
 		}
-		if s.LastReadDate != nil {
-			sb.WriteString(fmt.Sprintf("  %s — %d раз, последний: %s\n",
-				s.ParticipantName, s.ReadCount, s.LastReadDate.Format("2006-01-02")))
-		} else {
-			sb.WriteString(fmt.Sprintf("  %s — 0 раз\n", s.ParticipantName))
-		}
+		sb.WriteString(fmt.Sprintf("  %s — %d раз, последний: %s\n",
+			s.ParticipantName, s.ReadCount, s.LastReadDate.Format("2006-01-02")))
+	}
+	if sb.Len() == 0 {
+		return "(нет данных)\n"
 	}
 	return sb.String()
 }
@@ -573,13 +571,12 @@ func (b *Bot) toolGetParticipantStats(ctx context.Context, since, until, book, p
 		return fmt.Sprintf("error: %v", err)
 	}
 
-	if len(stats) == 0 {
-		return "(нет данных)\n"
-	}
-
 	var sb strings.Builder
 	currentParticipant := ""
 	for _, s := range stats {
+		if s.ReadCount == 0 {
+			continue
+		}
 		if s.ParticipantName != currentParticipant {
 			if currentParticipant != "" {
 				sb.WriteString("\n")
@@ -587,11 +584,10 @@ func (b *Bot) toolGetParticipantStats(ctx context.Context, since, until, book, p
 			sb.WriteString(fmt.Sprintf("👤 %s:\n", s.ParticipantName))
 			currentParticipant = s.ParticipantName
 		}
-		if s.ReadCount > 0 {
-			sb.WriteString(fmt.Sprintf("  %s — %d раз\n", s.BookName, s.ReadCount))
-		} else {
-			sb.WriteString(fmt.Sprintf("  %s — 0 раз\n", s.BookName))
-		}
+		sb.WriteString(fmt.Sprintf("  %s — %d раз\n", s.BookName, s.ReadCount))
+	}
+	if sb.Len() == 0 {
+		return "(нет данных)\n"
 	}
 	return sb.String()
 }
