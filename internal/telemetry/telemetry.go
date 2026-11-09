@@ -36,11 +36,13 @@ func Enabled() bool {
 	return os.Getenv("OTEL_SDK_DISABLED") != "true" && os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != ""
 }
 
-// Setup installs global tracer, meter and logger providers. The returned shutdown
+// Setup installs global tracer, meter and logger providers. Traces go to the OTLP
+// backend and/or Langfuse (see LangfuseEnabled); metrics and logs only to OTLP. The returned shutdown
 // function flushes and stops all exporters and must be called before exit.
 func Setup(ctx context.Context) (shutdown func(context.Context) error, err error) {
 	noop := func(context.Context) error { return nil }
-	if !Enabled() {
+	otlpOn, langfuseOn := Enabled(), LangfuseEnabled()
+	if !otlpOn && !langfuseOn {
 		return noop, nil
 	}
 
@@ -74,13 +76,28 @@ func Setup(ctx context.Context) (shutdown func(context.Context) error, err error
 
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 
-	traceExp, err := otlptracehttp.New(ctx)
-	if err != nil {
-		return fail(fmt.Errorf("trace exporter: %w", err))
+	tpOpts := []sdktrace.TracerProviderOption{sdktrace.WithResource(res)}
+	if otlpOn {
+		traceExp, err := otlptracehttp.New(ctx)
+		if err != nil {
+			return fail(fmt.Errorf("trace exporter: %w", err))
+		}
+		tpOpts = append(tpOpts, sdktrace.WithBatcher(traceExp))
 	}
-	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(traceExp), sdktrace.WithResource(res))
+	if langfuseOn {
+		lfExp, err := newLangfuseExporter(ctx)
+		if err != nil {
+			return fail(fmt.Errorf("langfuse exporter: %w", err))
+		}
+		tpOpts = append(tpOpts, sdktrace.WithBatcher(lfExp))
+	}
+	tp := sdktrace.NewTracerProvider(tpOpts...)
 	shutdowns = append(shutdowns, tp.Shutdown)
 	otel.SetTracerProvider(tp)
+
+	if !otlpOn {
+		return shutdown, nil
+	}
 
 	metricExp, err := otlpmetrichttp.New(ctx)
 	if err != nil {

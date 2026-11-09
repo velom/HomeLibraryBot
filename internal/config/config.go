@@ -20,8 +20,8 @@ type Config struct {
 	HTTPPort int // Port for Mini App HTTP server (default: 8081)
 
 	// Notification configuration
-	NotificationChatID    int64 // Chat ID to send notifications when events are created via web-app (0 = disabled)
-	NotificationThreadID  int   // Thread/topic ID for forum groups (0 = general/no topic)
+	NotificationChatID   int64 // Chat ID to send notifications when events are created via web-app (0 = disabled)
+	NotificationThreadID int   // Thread/topic ID for forum groups (0 = general/no topic)
 
 	// ClickHouse configuration
 	ClickHouseHost     string
@@ -37,6 +37,10 @@ type Config struct {
 	LLMBaseURL string
 	LLMApiKey  string
 	LLMModel   string
+	// LLMLangfuseGateway marks LLM_BASE_URL as the Langfuse AI Gateway (LLM_LANGFUSE_GATEWAY).
+	LLMLangfuseGateway bool
+	// LangfuseEnvironment is the Langfuse environment of traces (LANGFUSE_TRACING_ENVIRONMENT).
+	LangfuseEnvironment string
 }
 
 // LoadFromEnv loads configuration from environment variables
@@ -152,6 +156,8 @@ func LoadFromEnv() (*Config, error) {
 	if config.LLMModel == "" {
 		config.LLMModel = "gemini-2.0-flash"
 	}
+	config.LLMLangfuseGateway = os.Getenv("LLM_LANGFUSE_GATEWAY") == "true"
+	config.LangfuseEnvironment = os.Getenv("LANGFUSE_TRACING_ENVIRONMENT")
 
 	return config, nil
 }

@@ -34,7 +34,9 @@ func TestLoggerWithoutSpanIsUnchanged(t *testing.T) {
 
 func TestSetupDisabledWithoutEndpoint(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	t.Setenv("LANGFUSE_PUBLIC_KEY", "")
 	assert.False(t, Enabled())
+	assert.False(t, LangfuseEnabled())
 	shutdown, err := Setup(context.Background())
 	require.NoError(t, err)
 	require.NoError(t, shutdown(context.Background()))

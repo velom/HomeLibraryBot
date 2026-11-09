@@ -2,8 +2,10 @@ package bot
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +32,27 @@ const askSystemPrompt = `Ты — помощник семейной библио
 Сегодняшняя дата: %s`
 
 const maxToolIterations = 5
+
+// askTraceName names each /ask turn in Langfuse. Keep it stable: evaluators and dashboards reference it.
+const askTraceName = "answer-question"
+
+const iterationLimitAnswer = "Превышен лимит обращений к данным. Попробуйте упростить вопрос."
+
+// askTraceAttrs builds the Langfuse trace attributes for an /ask turn: one trace per turn,
+// one session per /ask conversation.
+func (b *Bot) askTraceAttrs(userID int64, sessionID string) llm.TraceAttrs {
+	return llm.TraceAttrs{
+		SessionID:   sessionID,
+		UserID:      strconv.FormatInt(userID, 10),
+		TraceName:   askTraceName,
+		Environment: b.llmClient.Environment(),
+		Tags:        []string{"ask"},
+	}
+}
+
+func newAskSessionID() string {
+	return "ask-" + rand.Text()
+}
 
 var askTools = []llm.Tool{
 	{
@@ -142,10 +165,11 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 	}
 
 	userID := message.From.ID
+	sessionID := newAskSessionID()
 
 	if question != "" {
 		history = append(history, llm.Message{Role: "user", Content: question})
-		answer, newHistory, err := b.runAskWithTools(ctx, history)
+		answer, newHistory, err := b.runAskWithTools(ctx, history, b.askTraceAttrs(userID, sessionID))
 		if err != nil {
 			b.log(ctx).Error("LLM request failed", zap.Error(err))
 			b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Ошибка при обращении к ИИ: %v", err), message.MessageThreadID)
@@ -163,7 +187,7 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 	b.states[userID] = &ConversationState{
 		Command:         "ask",
 		Step:            1,
-		Data:            map[string]interface{}{"history": history},
+		Data:            map[string]interface{}{"history": history, "session_id": sessionID},
 		MessageThreadID: message.MessageThreadID,
 	}
 	b.statesMu.Unlock()
@@ -180,7 +204,12 @@ func (b *Bot) handleAskConversation(ctx context.Context, message *models.Message
 
 	history = append(history, llm.Message{Role: "user", Content: message.Text})
 
-	answer, newHistory, err := b.runAskWithTools(ctx, history)
+	sessionID, _ := state.Data["session_id"].(string)
+	if sessionID == "" {
+		sessionID = newAskSessionID()
+		state.Data["session_id"] = sessionID
+	}
+	answer, newHistory, err := b.runAskWithTools(ctx, history, b.askTraceAttrs(message.From.ID, sessionID))
 	if err != nil {
 		b.log(ctx).Error("LLM request failed", zap.Error(err))
 		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Ошибка при обращении к ИИ: %v", err), state.MessageThreadID)
@@ -192,7 +221,22 @@ func (b *Bot) handleAskConversation(ctx context.Context, message *models.Message
 }
 
 // runAskWithTools executes the tool-calling loop: LLM requests tools, bot executes them, repeats.
-func (b *Bot) runAskWithTools(ctx context.Context, history []llm.Message) (string, []llm.Message, error) {
+// Each call is one Langfuse trace: an agent observation with a generation per LLM call and a
+// tool observation per executed tool (siblings under the agent).
+func (b *Bot) runAskWithTools(ctx context.Context, history []llm.Message, attrs llm.TraceAttrs) (answer string, _ []llm.Message, err error) {
+	ctx, agent := llm.StartAgent(ctx, askTraceName, attrs, lastUserMessage(history))
+	iterations, hitLimit := 0, false
+	defer func() {
+		agent.SetMetadata("tool_iterations", iterations)
+		agent.SetMetadata("hit_iteration_limit", hitLimit)
+		if err != nil {
+			agent.Fail(err)
+		} else {
+			agent.SetOutput(answer)
+		}
+		agent.End()
+	}()
+
 	for i := 0; i < maxToolIterations; i++ {
 		resp, err := b.llmClient.ChatWithTools(ctx, history, askTools)
 		if err != nil {
@@ -205,6 +249,7 @@ func (b *Bot) runAskWithTools(ctx context.Context, history []llm.Message) (strin
 			return resp.Content, history, nil
 		}
 
+		iterations++
 		// LLM wants to call tools — execute them
 		b.log(ctx).Debug("LLM requested tool calls",
 			zap.Int("count", len(resp.ToolCalls)),
@@ -216,7 +261,7 @@ func (b *Bot) runAskWithTools(ctx context.Context, history []llm.Message) (strin
 
 		// Execute each tool and append results
 		for _, tc := range resp.ToolCalls {
-			result := b.executeTool(ctx, tc.Function.Name, tc.Function.Arguments)
+			result := b.runTracedTool(ctx, tc)
 			history = append(history, llm.Message{
 				Role:       "tool",
 				Content:    result,
@@ -225,7 +270,31 @@ func (b *Bot) runAskWithTools(ctx context.Context, history []llm.Message) (strin
 		}
 	}
 
-	return "Превышен лимит обращений к данным. Попробуйте упростить вопрос.", history, nil
+	hitLimit = true
+	return iterationLimitAnswer, history, nil
+}
+
+// runTracedTool executes a tool call inside a Langfuse tool observation.
+func (b *Bot) runTracedTool(ctx context.Context, tc llm.ToolCall) string {
+	ctx, obs := llm.StartTool(ctx, tc.Function.Name, tc.Function.Arguments)
+	defer obs.End()
+	obs.SetMetadata("tool_call_id", tc.ID)
+	result := b.executeTool(ctx, tc.Function.Name, tc.Function.Arguments)
+	obs.SetOutput(result)
+	// Tools report failures as "error: ..." strings so the LLM can react to them.
+	if msg, ok := strings.CutPrefix(result, "error: "); ok {
+		obs.Fail(fmt.Errorf("%s", msg))
+	}
+	return result
+}
+
+func lastUserMessage(history []llm.Message) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" {
+			return history[i].Content
+		}
+	}
+	return ""
 }
 
 // executeTool runs a tool by name and returns the result as a string.
