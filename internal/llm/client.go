@@ -14,6 +14,8 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
+
+	"library/internal/telemetry"
 )
 
 // Config holds configuration for the LLM client.
@@ -232,7 +234,7 @@ func (c *Client) chatWithRetry(ctx context.Context, messages []Message, tools []
 		if err == nil || attempt >= c.maxAttempts || !retryable(ctx, err) {
 			return resp, completion, attempt, err
 		}
-		c.logger.Warn("LLM request failed, retrying",
+		telemetry.Logger(ctx, c.logger).Warn("LLM request failed, retrying",
 			zap.Int("attempt", attempt), zap.Duration("delay", delay), zap.Error(err))
 		select {
 		case <-ctx.Done():
