@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,13 +25,36 @@ const askSystemPrompt = `Ты — помощник семейной библио
 - "Прошлая неделя" = последние 7 дней. "Этот месяц" = с 1-го числа текущего месяца. Решай сам.
 - Не придумывай данные — всегда запрашивай через инструменты.
 - Считай внимательно, проверяй даты.
+- Вопросы «что не читали / ни разу не читали / 0 прочтений» — только через get_unread_books.
+- Участники перечислены ниже — get_participants для этого не вызывай. В параметр participant передавай имя из этого списка (в именительном падеже).
 
 ФОРМАТИРОВАНИЕ:
 - Используй Telegram HTML: <b>жирный</b>, <i>курсив</i>, <code>код</code>
 - НЕ используй Markdown (**, *, #). Только HTML-теги.
 - Для списков используй простые переносы строк с тире или номерами
 
-Сегодняшняя дата: %s`
+Сегодняшняя дата: %s
+Участники: %s`
+
+// askSystemMessage builds the system prompt. Participants are inlined so the model doesn't spend an
+// LLM round trip on get_participants before every per-person question.
+func (b *Bot) askSystemMessage(ctx context.Context) llm.Message {
+	participants := "(см. get_participants)"
+	if list, err := b.db.ListParticipants(ctx); err != nil {
+		b.log(ctx).Warn("Failed to list participants for /ask prompt", zap.Error(err))
+	} else if len(list) > 0 {
+		parts := make([]string, 0, len(list))
+		for _, p := range list {
+			role := "ребёнок"
+			if p.IsParent {
+				role = "родитель"
+			}
+			parts = append(parts, fmt.Sprintf("%s (%s)", p.Name, role))
+		}
+		participants = strings.Join(parts, ", ")
+	}
+	return llm.Message{Role: "system", Content: fmt.Sprintf(askSystemPrompt, time.Now().Format("2006-01-02"), participants)}
+}
 
 const maxToolIterations = 5
 
@@ -80,7 +105,7 @@ var askTools = []llm.Tool{
 				"limit":{"type":"integer","description":"Количество событий (по умолчанию 50, максимум 500)"},
 				"since":{"type":"string","description":"Дата начала в формате YYYY-MM-DD (только события с этой даты)"},
 				"until":{"type":"string","description":"Дата конца в формате YYYY-MM-DD (только события до этой даты включительно)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все)"}
+				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все). Регистр не важен"}
 			}}`),
 		},
 	},
@@ -91,7 +116,7 @@ var askTools = []llm.Tool{
 			Description: "Получить топ книг по количеству прочтений за указанный период",
 			Parameters: json.RawMessage(`{"type":"object","properties":{
 				"days":{"type":"integer","description":"За сколько последних дней считать (по умолчанию 30)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все дети)"},
+				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все дети). Регистр не важен"},
 				"limit":{"type":"integer","description":"Сколько книг вернуть (по умолчанию 10)"}
 			}}`),
 		},
@@ -100,10 +125,11 @@ var askTools = []llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "get_rarely_read_books",
-			Description: "Получить книги, которые давно не читали, отсортированные по дате последнего прочтения",
+			Description: "Получить книги, которые читали давно, отсортированные по дате последнего прочтения (самые давние первыми). По умолчанию учитываются все участники. Книги, которые не читали ни разу, здесь не выводятся — для них используй get_unread_books",
 			Parameters: json.RawMessage(`{"type":"object","properties":{
 				"label":{"type":"string","description":"Фильтр по метке (пусто = все книги)"},
-				"limit":{"type":"integer","description":"Сколько книг вернуть (по умолчанию 10)"}
+				"limit":{"type":"integer","description":"Сколько книг вернуть (по умолчанию 10)"},
+				"readers":{"type":"string","enum":["all","children"],"description":"Чьи чтения учитывать: all — все участники, children — только дети (по умолчанию all)"}
 			}}`),
 		},
 	},
@@ -119,12 +145,12 @@ var askTools = []llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "get_detailed_book_stats",
-			Description: "Получить детальную статистику по книгам: кто сколько раз прочитал каждую книгу и когда был последний раз. Возвращает только пары книга×участник с ненулевым числом прочтений за период; если ничего не прочитано — «(нет данных)». Для общей картины вызывай без фильтров, для конкретной книги — с параметром book",
+			Description: "Получить детальную статистику по книгам: кто сколько раз прочитал каждую книгу и когда был последний раз. Возвращает только пары книга×участник с ненулевым числом прочтений за период; если ничего не прочитано — «(нет данных)». Для общей картины вызывай без фильтров, для конкретной книги — с параметром book. Для непрочитанных книг используй get_unread_books",
 			Parameters: json.RawMessage(`{"type":"object","properties":{
 				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"book":{"type":"string","description":"Название книги для фильтрации (по умолчанию: все книги)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники)"}
+				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники). Регистр не важен"}
 			}}`),
 		},
 	},
@@ -132,12 +158,26 @@ var askTools = []llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "get_participant_stats",
-			Description: "Получить статистику в разрезе читающих: кто сколько каких книг прочитал. Возвращает только прочитанные за период книги (без нулевых); если ничего не прочитано — «(нет данных)». Для конкретного участника — с параметром participant",
+			Description: "Получить статистику в разрезе читающих: кто сколько каких книг прочитал. Возвращает только прочитанные за период книги (без нулевых); если ничего не прочитано — «(нет данных)». Для конкретного участника — с параметром participant. Для непрочитанных книг используй get_unread_books",
 			Parameters: json.RawMessage(`{"type":"object","properties":{
 				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"book":{"type":"string","description":"Название книги для фильтрации (по умолчанию: все книги)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники)"}
+				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники). Регистр не важен"}
+			}}`),
+		},
+	},
+	{
+		Type: "function",
+		Function: llm.ToolFunction{
+			Name:        "get_unread_books",
+			Description: "Книги, которые НЕ ЧИТАЛИ НИ РАЗУ — за всё время (без дат) или в указанном периоде (since/until); можно ограничить участником и меткой. Используй для вопросов «не читали», «ни разу», «0 прочтений», «что ещё не читали». Возвращает точный список — сверять списки самому не нужно",
+			Parameters: json.RawMessage(`{"type":"object","properties":{
+				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
+				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD включительно (по умолчанию: всё время)"},
+				"participant":{"type":"string","description":"Имя участника: книги, которые не читал именно он (по умолчанию: никто). Регистр не важен"},
+				"label":{"type":"string","description":"Только книги с этой меткой (по умолчанию: все книги)"},
+				"readers":{"type":"string","enum":["all","children","parents"],"description":"Кого учитывать: all — все, children — только дети, parents — только родители (по умолчанию all)"}
 			}}`),
 		},
 	},
@@ -151,7 +191,7 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 	}
 
 	history := []llm.Message{
-		{Role: "system", Content: fmt.Sprintf(askSystemPrompt, time.Now().Format("2006-01-02"))},
+		b.askSystemMessage(ctx),
 	}
 
 	// Check if there's a question inline with the command
@@ -169,7 +209,9 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 
 	if question != "" {
 		history = append(history, llm.Message{Role: "user", Content: question})
+		stopTyping := b.keepTyping(ctx, message.Chat.ID, message.MessageThreadID)
 		answer, newHistory, err := b.runAskWithTools(ctx, history, b.askTraceAttrs(userID, sessionID))
+		stopTyping()
 		if err != nil {
 			b.log(ctx).Error("LLM request failed", zap.Error(err))
 			b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Ошибка при обращении к ИИ: %v", err), message.MessageThreadID)
@@ -209,7 +251,9 @@ func (b *Bot) handleAskConversation(ctx context.Context, message *models.Message
 		sessionID = newAskSessionID()
 		state.Data["session_id"] = sessionID
 	}
+	stopTyping := b.keepTyping(ctx, message.Chat.ID, state.MessageThreadID)
 	answer, newHistory, err := b.runAskWithTools(ctx, history, b.askTraceAttrs(message.From.ID, sessionID))
+	stopTyping()
 	if err != nil {
 		b.log(ctx).Error("LLM request failed", zap.Error(err))
 		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Ошибка при обращении к ИИ: %v", err), state.MessageThreadID)
@@ -308,6 +352,15 @@ func (b *Bot) executeTool(ctx context.Context, name, argsJSON string) string {
 		}
 	}
 
+	participant := ""
+	if raw := stringArg(args, "participant", ""); raw != "" {
+		resolved, errStr := b.resolveParticipant(ctx, raw)
+		if errStr != "" {
+			return errStr
+		}
+		participant = resolved
+	}
+
 	switch name {
 	case "get_books":
 		return b.toolGetBooks(ctx)
@@ -320,31 +373,42 @@ func (b *Bot) executeTool(ctx context.Context, name, argsJSON string) string {
 		}
 		since := stringArg(args, "since", "")
 		until := stringArg(args, "until", "")
-		participant := stringArg(args, "participant", "")
 		return b.toolGetLastEvents(ctx, limit, since, until, participant)
 	case "get_top_books":
 		days := intArg(args, "days", 30)
-		participant := stringArg(args, "participant", "")
 		limit := intArg(args, "limit", 10)
 		return b.toolGetTopBooks(ctx, days, participant, limit)
 	case "get_rarely_read_books":
 		label := stringArg(args, "label", "")
 		limit := intArg(args, "limit", 10)
-		return b.toolGetRarelyReadBooks(ctx, label, limit)
+		var childrenOnly bool
+		switch stringArg(args, "readers", readersAll) {
+		case readersAll:
+		case readersChildren:
+			childrenOnly = true
+		default:
+			return "error: readers must be one of: all, children"
+		}
+		return b.toolGetRarelyReadBooks(ctx, label, limit, childrenOnly)
 	case "get_labels":
 		return b.toolGetLabels(ctx)
 	case "get_detailed_book_stats":
 		since := stringArg(args, "since", "")
 		until := stringArg(args, "until", "")
 		book := stringArg(args, "book", "")
-		participant := stringArg(args, "participant", "")
 		return b.toolGetDetailedBookStats(ctx, since, until, book, participant)
 	case "get_participant_stats":
 		since := stringArg(args, "since", "")
 		until := stringArg(args, "until", "")
 		book := stringArg(args, "book", "")
-		participant := stringArg(args, "participant", "")
 		return b.toolGetParticipantStats(ctx, since, until, book, participant)
+	case "get_unread_books":
+		return b.toolGetUnreadBooks(ctx,
+			stringArg(args, "since", ""),
+			stringArg(args, "until", ""),
+			participant,
+			strings.TrimSpace(stringArg(args, "label", "")),
+			stringArg(args, "readers", readersAll))
 	default:
 		return fmt.Sprintf("error: unknown tool %q", name)
 	}
@@ -426,24 +490,161 @@ func (b *Bot) toolGetTopBooks(ctx context.Context, days int, participant string,
 	return sb.String()
 }
 
-func (b *Bot) toolGetRarelyReadBooks(ctx context.Context, label string, limit int) string {
-	stats, err := b.db.GetRarelyReadBooks(ctx, limit, true, label, nil)
+// toolGetRarelyReadBooks lists read books by staleness. Never-read books are left to get_unread_books:
+// storage sorts them last, so they would only show up with a large limit.
+func (b *Bot) toolGetRarelyReadBooks(ctx context.Context, label string, limit int, childrenOnly bool) string {
+	stats, err := b.db.GetRarelyReadBooks(ctx, limit, childrenOnly, label, nil)
 	if err != nil {
 		return fmt.Sprintf("error: %v", err)
 	}
 	var sb strings.Builder
-	for i, s := range stats {
-		if s.LastReadDate != nil {
-			sb.WriteString(fmt.Sprintf("%d. %s — последнее чтение: %s (%d дн. назад)\n",
-				i+1, s.BookName, s.LastReadDate.Format("2006-01-02"), s.DaysSinceLastRead))
-		} else {
-			sb.WriteString(fmt.Sprintf("%d. %s — никогда не читали\n", i+1, s.BookName))
+	n, hasUnread := 0, false
+	for _, s := range stats {
+		if s.LastReadDate == nil {
+			hasUnread = true
+			continue
 		}
+		n++
+		sb.WriteString(fmt.Sprintf("%d. %s — последнее чтение: %s (%d дн. назад)\n",
+			n, s.BookName, s.LastReadDate.Format("2006-01-02"), s.DaysSinceLastRead))
 	}
-	if len(stats) == 0 {
+	if n == 0 && !hasUnread {
 		sb.WriteString("(нет данных)\n")
 	}
+	if hasUnread {
+		sb.WriteString("Есть книги, которые ни разу не читали, — см. get_unread_books.\n")
+	}
 	return sb.String()
+}
+
+const (
+	readersAll      = "all"
+	readersChildren = "children"
+	readersParents  = "parents"
+)
+
+// resolveParticipant maps a user-supplied name to the stored one, case-insensitively, so a wrong-case name
+// doesn't silently look like "nobody read it".
+func (b *Bot) resolveParticipant(ctx context.Context, name string) (string, string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", ""
+	}
+	participants, err := b.db.ListParticipants(ctx)
+	if err != nil {
+		return "", fmt.Sprintf("error: %v", err)
+	}
+	known := make([]string, 0, len(participants))
+	for _, p := range participants {
+		if strings.EqualFold(p.Name, name) {
+			return p.Name, ""
+		}
+		known = append(known, p.Name)
+	}
+	sort.Strings(known)
+	return "", fmt.Sprintf("error: unknown participant %q; known: %s", name, strings.Join(known, ", "))
+}
+
+func (b *Bot) toolGetUnreadBooks(ctx context.Context, since, until, participant, label, readers string) string {
+	var who string
+	switch readers {
+	case readersAll:
+		who = "все"
+	case readersChildren:
+		who = "дети"
+	case readersParents:
+		who = "родители"
+	default:
+		return "error: readers must be one of: all, children, parents"
+	}
+	sinceDate, untilDate, errStr := parseDateRange(since, until)
+	if errStr != "" {
+		return errStr
+	}
+
+	participants, err := b.db.ListParticipants(ctx)
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+	counted := map[string]bool{}
+	if participant != "" {
+		counted[participant] = true
+		who = participant
+		if readers != readersAll {
+			who += " (readers проигнорирован)"
+		}
+	} else {
+		for _, p := range participants {
+			if readers == readersAll || (readers == readersParents) == p.IsParent {
+				counted[p.Name] = true
+			}
+		}
+	}
+	// With nobody to count, every book would look unread (or none, given the CROSS JOIN) — refuse instead.
+	if len(counted) == 0 {
+		return fmt.Sprintf("error: нет участников для readers=%s", readers)
+	}
+
+	books, err := b.db.ListReadableBooks(ctx)
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+	stats, err := b.db.GetDetailedBookStats(ctx, sinceDate, untilDate, "", participant)
+	if err != nil {
+		return fmt.Sprintf("error: %v", err)
+	}
+	reads := map[string]int{}
+	for _, s := range stats {
+		if counted[s.ParticipantName] {
+			reads[s.BookName] += s.ReadCount
+		}
+	}
+
+	total := 0
+	var unread []string
+	for _, book := range books {
+		if label != "" && !slices.Contains(book.Labels, label) {
+			continue
+		}
+		total++
+		if reads[book.Name] == 0 {
+			unread = append(unread, book.Name)
+		}
+	}
+	if total == 0 {
+		if label != "" {
+			return fmt.Sprintf("Нет книг с меткой «%s»\n", label)
+		}
+		return "(нет книг)\n"
+	}
+	sort.Strings(unread)
+
+	scope := fmt.Sprintf("кто: %s; период: %s", who, describePeriod(since, until))
+	if label != "" {
+		scope += "; метка: " + label
+	}
+	if len(unread) == 0 {
+		return fmt.Sprintf("Все %d книг читались хотя бы раз (%s)\n", total, scope)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Ни разу не читали (%s): %d из %d\n", scope, len(unread), total)
+	for i, name := range unread {
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, name)
+	}
+	return sb.String()
+}
+
+func describePeriod(since, until string) string {
+	switch {
+	case since == "" && until == "":
+		return "всё время"
+	case until == "":
+		return "с " + since
+	case since == "":
+		return "по " + until
+	default:
+		return since + " — " + until
+	}
 }
 
 func (b *Bot) toolGetLabels(ctx context.Context) string {

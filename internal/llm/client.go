@@ -4,14 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
+
+	"library/internal/telemetry"
 )
 
 // Config holds configuration for the LLM client.
@@ -26,6 +30,48 @@ type Config struct {
 	Gateway bool
 	// Environment is the Langfuse environment of traces (e.g. production, development).
 	Environment string
+	// MaxAttempts bounds attempts per call on transient failures (429, 5xx, timeouts). Default 3.
+	MaxAttempts int
+	// RetryBaseDelay is the delay before the first retry; it doubles per retry. Default 1s.
+	RetryBaseDelay time.Duration
+	// RequestTimeout bounds a single HTTP attempt. Default 30s.
+	RequestTimeout time.Duration
+}
+
+const (
+	defaultMaxAttempts    = 3
+	defaultRetryBaseDelay = time.Second
+	defaultRequestTimeout = 30 * time.Second
+)
+
+// APIError is a non-200 response from the provider.
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("llm: API error status %d: %s", e.StatusCode, e.Body)
+}
+
+// retryable reports whether a failed attempt is worth repeating: provider overload/rate limits
+// and per-attempt timeouts. Caller cancellation and malformed responses are not retried.
+func retryable(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
+		switch apiErr.StatusCode {
+		case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway,
+			http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return true
+		}
+		return false
+	}
+	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
+		return true
+	}
+	return false
 }
 
 // Client is a provider-agnostic LLM client using the OpenAI-compatible chat completions API.
@@ -37,13 +83,27 @@ type Client struct {
 	gateway    bool
 	env        string
 	logger     *zap.Logger
+
+	maxAttempts    int
+	retryBaseDelay time.Duration
 }
 
 // NewClient creates a new LLM client with the given configuration.
 func NewClient(cfg Config, logger *zap.Logger) *Client {
+	if cfg.MaxAttempts <= 0 {
+		cfg.MaxAttempts = defaultMaxAttempts
+	}
+	if cfg.RetryBaseDelay <= 0 {
+		cfg.RetryBaseDelay = defaultRetryBaseDelay
+	}
+	if cfg.RequestTimeout <= 0 {
+		cfg.RequestTimeout = defaultRequestTimeout
+	}
 	return &Client{
+		maxAttempts:    cfg.MaxAttempts,
+		retryBaseDelay: cfg.RetryBaseDelay,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: cfg.RequestTimeout,
 			// No propagation: trace context must not leak to the LLM provider.
 			// Gateway mode injects traceparent explicitly (see injectTraceparent).
 			Transport: otelhttp.NewTransport(http.DefaultTransport,
@@ -149,7 +209,10 @@ func (c *Client) ChatWithTools(ctx context.Context, messages []Message, tools []
 		ctx, gen = startGeneration(ctx, c.model, messages, tools)
 		defer gen.End()
 	}
-	resp, completion, err := c.chat(ctx, messages, tools)
+	resp, completion, attempts, err := c.chatWithRetry(ctx, messages, tools)
+	if attempts > 1 {
+		gen.SetMetadata("attempts", attempts)
+	}
 	if err != nil {
 		gen.Fail(err)
 		return nil, err
@@ -160,6 +223,26 @@ func (c *Client) ChatWithTools(ctx context.Context, messages []Message, tools []
 		gen.SetMetadata("response_model", completion.Model)
 	}
 	return resp, nil
+}
+
+// chatWithRetry repeats transient failures with exponential backoff. The whole loop shares one
+// generation span, so a retried call is still one Langfuse generation.
+func (c *Client) chatWithRetry(ctx context.Context, messages []Message, tools []Tool) (*ChatResponse, *chatCompletionResponse, int, error) {
+	delay := c.retryBaseDelay
+	for attempt := 1; ; attempt++ {
+		resp, completion, err := c.chat(ctx, messages, tools)
+		if err == nil || attempt >= c.maxAttempts || !retryable(ctx, err) {
+			return resp, completion, attempt, err
+		}
+		telemetry.Logger(ctx, c.logger).Warn("LLM request failed, retrying",
+			zap.Int("attempt", attempt), zap.Duration("delay", delay), zap.Error(err))
+		select {
+		case <-ctx.Done():
+			return nil, nil, attempt, err
+		case <-time.After(delay):
+		}
+		delay *= 2
+	}
 }
 
 func (c *Client) chat(ctx context.Context, messages []Message, tools []Tool) (*ChatResponse, *chatCompletionResponse, error) {
@@ -199,7 +282,7 @@ func (c *Client) chat(ctx context.Context, messages []Message, tools []Tool) (*C
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("llm: API error status %d: %s", resp.StatusCode, string(respBytes))
+		return nil, nil, &APIError{StatusCode: resp.StatusCode, Body: string(respBytes)}
 	}
 
 	var completion chatCompletionResponse
