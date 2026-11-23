@@ -26,6 +26,7 @@ const askSystemPrompt = `Ты — помощник семейной библио
 - Не придумывай данные — всегда запрашивай через инструменты.
 - Считай внимательно, проверяй даты.
 - Вопросы «что не читали / ни разу не читали / 0 прочтений» — только через get_unread_books.
+- Имя участника передавай в параметр participant сразу, как написал пользователь. Не вызывай get_participants, чтобы проверить имя: при неизвестном имени инструмент сам вернёт список участников.
 
 ФОРМАТИРОВАНИЕ:
 - Используй Telegram HTML: <b>жирный</b>, <i>курсив</i>, <code>код</code>
@@ -83,7 +84,7 @@ var askTools = []llm.Tool{
 				"limit":{"type":"integer","description":"Количество событий (по умолчанию 50, максимум 500)"},
 				"since":{"type":"string","description":"Дата начала в формате YYYY-MM-DD (только события с этой даты)"},
 				"until":{"type":"string","description":"Дата конца в формате YYYY-MM-DD (только события до этой даты включительно)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все)"}
+				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все). Имя как написал пользователь, в любом регистре — get_participants для проверки вызывать не нужно"}
 			}}`),
 		},
 	},
@@ -94,7 +95,7 @@ var askTools = []llm.Tool{
 			Description: "Получить топ книг по количеству прочтений за указанный период",
 			Parameters: json.RawMessage(`{"type":"object","properties":{
 				"days":{"type":"integer","description":"За сколько последних дней считать (по умолчанию 30)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все дети)"},
+				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все дети). Имя как написал пользователь, в любом регистре — get_participants для проверки вызывать не нужно"},
 				"limit":{"type":"integer","description":"Сколько книг вернуть (по умолчанию 10)"}
 			}}`),
 		},
@@ -128,7 +129,7 @@ var askTools = []llm.Tool{
 				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"book":{"type":"string","description":"Название книги для фильтрации (по умолчанию: все книги)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники)"}
+				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники). Имя как написал пользователь, в любом регистре — get_participants для проверки вызывать не нужно"}
 			}}`),
 		},
 	},
@@ -141,7 +142,7 @@ var askTools = []llm.Tool{
 				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"book":{"type":"string","description":"Название книги для фильтрации (по умолчанию: все книги)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники)"}
+				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники). Имя как написал пользователь, в любом регистре — get_participants для проверки вызывать не нужно"}
 			}}`),
 		},
 	},
@@ -153,7 +154,7 @@ var askTools = []llm.Tool{
 			Parameters: json.RawMessage(`{"type":"object","properties":{
 				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD включительно (по умолчанию: всё время)"},
-				"participant":{"type":"string","description":"Имя участника: книги, которые не читал именно он (по умолчанию: никто)"},
+				"participant":{"type":"string","description":"Имя участника: книги, которые не читал именно он (по умолчанию: никто). Имя как написал пользователь, в любом регистре — get_participants для проверки вызывать не нужно"},
 				"label":{"type":"string","description":"Только книги с этой меткой (по умолчанию: все книги)"},
 				"readers":{"type":"string","enum":["all","children","parents"],"description":"Кого учитывать: all — все, children — только дети, parents — только родители (по умолчанию all)"}
 			}}`),
