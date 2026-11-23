@@ -335,3 +335,15 @@ func TestParticipantResolutionInExecuteTool(t *testing.T) {
 			b.executeTool(ctx, tool, `{"participant":"Маша"}`), tool)
 	}
 }
+
+func TestAskSystemMessageListsParticipants(t *testing.T) {
+	b, _ := newTestBot(t)
+	msg := b.askSystemMessage(context.Background())
+	assert.Equal(t, "system", msg.Role)
+	assert.Contains(t, msg.Content, "Участники: Alice (ребёнок), Bob (ребёнок), Dad (родитель), Mom (родитель)")
+	assert.Contains(t, msg.Content, "Сегодняшняя дата: "+time.Now().Format("2006-01-02"))
+	assert.NotContains(t, msg.Content, "%!")
+
+	empty := &Bot{db: stubs.NewMockDB(), logger: zap.NewNop()}
+	assert.Contains(t, empty.askSystemMessage(context.Background()).Content, "Участники: (см. get_participants)")
+}

@@ -26,14 +26,35 @@ const askSystemPrompt = `Ты — помощник семейной библио
 - Не придумывай данные — всегда запрашивай через инструменты.
 - Считай внимательно, проверяй даты.
 - Вопросы «что не читали / ни разу не читали / 0 прочтений» — только через get_unread_books.
-- Имя участника передавай в параметр participant сразу, как написал пользователь. Не вызывай get_participants, чтобы проверить имя: при неизвестном имени инструмент сам вернёт список участников.
+- Участники перечислены ниже — get_participants для этого не вызывай. В параметр participant передавай имя из этого списка (в именительном падеже).
 
 ФОРМАТИРОВАНИЕ:
 - Используй Telegram HTML: <b>жирный</b>, <i>курсив</i>, <code>код</code>
 - НЕ используй Markdown (**, *, #). Только HTML-теги.
 - Для списков используй простые переносы строк с тире или номерами
 
-Сегодняшняя дата: %s`
+Сегодняшняя дата: %s
+Участники: %s`
+
+// askSystemMessage builds the system prompt. Participants are inlined so the model doesn't spend an
+// LLM round trip on get_participants before every per-person question.
+func (b *Bot) askSystemMessage(ctx context.Context) llm.Message {
+	participants := "(см. get_participants)"
+	if list, err := b.db.ListParticipants(ctx); err != nil {
+		b.log(ctx).Warn("Failed to list participants for /ask prompt", zap.Error(err))
+	} else if len(list) > 0 {
+		parts := make([]string, 0, len(list))
+		for _, p := range list {
+			role := "ребёнок"
+			if p.IsParent {
+				role = "родитель"
+			}
+			parts = append(parts, fmt.Sprintf("%s (%s)", p.Name, role))
+		}
+		participants = strings.Join(parts, ", ")
+	}
+	return llm.Message{Role: "system", Content: fmt.Sprintf(askSystemPrompt, time.Now().Format("2006-01-02"), participants)}
+}
 
 const maxToolIterations = 5
 
@@ -84,7 +105,7 @@ var askTools = []llm.Tool{
 				"limit":{"type":"integer","description":"Количество событий (по умолчанию 50, максимум 500)"},
 				"since":{"type":"string","description":"Дата начала в формате YYYY-MM-DD (только события с этой даты)"},
 				"until":{"type":"string","description":"Дата конца в формате YYYY-MM-DD (только события до этой даты включительно)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все). Имя как написал пользователь, в любом регистре — get_participants для проверки вызывать не нужно"}
+				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все). Регистр не важен"}
 			}}`),
 		},
 	},
@@ -95,7 +116,7 @@ var askTools = []llm.Tool{
 			Description: "Получить топ книг по количеству прочтений за указанный период",
 			Parameters: json.RawMessage(`{"type":"object","properties":{
 				"days":{"type":"integer","description":"За сколько последних дней считать (по умолчанию 30)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все дети). Имя как написал пользователь, в любом регистре — get_participants для проверки вызывать не нужно"},
+				"participant":{"type":"string","description":"Имя участника для фильтрации (пусто = все дети). Регистр не важен"},
 				"limit":{"type":"integer","description":"Сколько книг вернуть (по умолчанию 10)"}
 			}}`),
 		},
@@ -129,7 +150,7 @@ var askTools = []llm.Tool{
 				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"book":{"type":"string","description":"Название книги для фильтрации (по умолчанию: все книги)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники). Имя как написал пользователь, в любом регистре — get_participants для проверки вызывать не нужно"}
+				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники). Регистр не важен"}
 			}}`),
 		},
 	},
@@ -142,7 +163,7 @@ var askTools = []llm.Tool{
 				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"book":{"type":"string","description":"Название книги для фильтрации (по умолчанию: все книги)"},
-				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники). Имя как написал пользователь, в любом регистре — get_participants для проверки вызывать не нужно"}
+				"participant":{"type":"string","description":"Имя участника для фильтрации (по умолчанию: все участники). Регистр не важен"}
 			}}`),
 		},
 	},
@@ -154,7 +175,7 @@ var askTools = []llm.Tool{
 			Parameters: json.RawMessage(`{"type":"object","properties":{
 				"since":{"type":"string","description":"Дата начала периода YYYY-MM-DD (по умолчанию: всё время)"},
 				"until":{"type":"string","description":"Дата конца периода YYYY-MM-DD включительно (по умолчанию: всё время)"},
-				"participant":{"type":"string","description":"Имя участника: книги, которые не читал именно он (по умолчанию: никто). Имя как написал пользователь, в любом регистре — get_participants для проверки вызывать не нужно"},
+				"participant":{"type":"string","description":"Имя участника: книги, которые не читал именно он (по умолчанию: никто). Регистр не важен"},
 				"label":{"type":"string","description":"Только книги с этой меткой (по умолчанию: все книги)"},
 				"readers":{"type":"string","enum":["all","children","parents"],"description":"Кого учитывать: all — все, children — только дети, parents — только родители (по умолчанию all)"}
 			}}`),
@@ -170,7 +191,7 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 	}
 
 	history := []llm.Message{
-		{Role: "system", Content: fmt.Sprintf(askSystemPrompt, time.Now().Format("2006-01-02"))},
+		b.askSystemMessage(ctx),
 	}
 
 	// Check if there's a question inline with the command
