@@ -187,7 +187,9 @@ func (b *Bot) handleAsk(ctx context.Context, message *models.Message) {
 
 	if question != "" {
 		history = append(history, llm.Message{Role: "user", Content: question})
+		stopTyping := b.keepTyping(ctx, message.Chat.ID, message.MessageThreadID)
 		answer, newHistory, err := b.runAskWithTools(ctx, history, b.askTraceAttrs(userID, sessionID))
+		stopTyping()
 		if err != nil {
 			b.log(ctx).Error("LLM request failed", zap.Error(err))
 			b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Ошибка при обращении к ИИ: %v", err), message.MessageThreadID)
@@ -227,7 +229,9 @@ func (b *Bot) handleAskConversation(ctx context.Context, message *models.Message
 		sessionID = newAskSessionID()
 		state.Data["session_id"] = sessionID
 	}
+	stopTyping := b.keepTyping(ctx, message.Chat.ID, state.MessageThreadID)
 	answer, newHistory, err := b.runAskWithTools(ctx, history, b.askTraceAttrs(message.From.ID, sessionID))
+	stopTyping()
 	if err != nil {
 		b.log(ctx).Error("LLM request failed", zap.Error(err))
 		b.sendMessageInThread(ctx, message.Chat.ID, fmt.Sprintf("Ошибка при обращении к ИИ: %v", err), state.MessageThreadID)
