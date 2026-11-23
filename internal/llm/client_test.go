@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,9 +20,10 @@ import (
 func newTestClient(t *testing.T, serverURL string) *llm.Client {
 	t.Helper()
 	cfg := llm.Config{
-		BaseURL: serverURL,
-		APIKey:  "test-key",
-		Model:   "test-model",
+		BaseURL:        serverURL,
+		APIKey:         "test-key",
+		Model:          "test-model",
+		RetryBaseDelay: time.Millisecond,
 	}
 	return llm.NewClient(cfg, zap.NewNop())
 }
@@ -201,4 +204,115 @@ func TestChatWithTools_TextResponse(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, resp.HasToolCalls())
 	assert.Equal(t, "Here is the answer", resp.Content)
+}
+
+func newRetryClient(t *testing.T, serverURL string, attempts int) *llm.Client {
+	t.Helper()
+	return llm.NewClient(llm.Config{
+		BaseURL: serverURL, APIKey: "k", Model: "m",
+		MaxAttempts: attempts, RetryBaseDelay: time.Millisecond,
+	}, zap.NewNop())
+}
+
+const okReply = `{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`
+
+func TestChatWithTools_RetriesTransientErrors(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		var calls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if calls.Add(1) < 3 {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"message":"busy"}}`))
+				return
+			}
+			_, _ = w.Write([]byte(okReply))
+		}))
+		resp, err := newRetryClient(t, server.URL, 3).ChatWithTools(context.Background(), []llm.Message{{Role: "user", Content: "q"}}, nil)
+		server.Close()
+		require.NoError(t, err, status)
+		assert.Equal(t, "ok", resp.Content)
+		assert.Equal(t, int32(3), calls.Load(), status)
+	}
+}
+
+func TestChatWithTools_GivesUpAfterMaxAttempts(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"high demand"}}`))
+	}))
+	defer server.Close()
+
+	_, err := newRetryClient(t, server.URL, 3).ChatWithTools(context.Background(), []llm.Message{{Role: "user", Content: "q"}}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "503")
+	assert.Equal(t, int32(3), calls.Load())
+}
+
+func TestChatWithTools_DoesNotRetryClientErrors(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound} {
+		var calls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			w.WriteHeader(status)
+		}))
+		_, err := newRetryClient(t, server.URL, 3).ChatWithTools(context.Background(), []llm.Message{{Role: "user", Content: "q"}}, nil)
+		server.Close()
+		require.Error(t, err)
+		assert.Equal(t, int32(1), calls.Load(), status)
+	}
+}
+
+func TestChatWithTools_DoesNotRetryMalformedResponse(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer server.Close()
+	_, err := newRetryClient(t, server.URL, 3).ChatWithTools(context.Background(), []llm.Message{{Role: "user", Content: "q"}}, nil)
+	require.Error(t, err)
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+func TestChatWithTools_StopsRetryingWhenContextDone(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client := llm.NewClient(llm.Config{BaseURL: server.URL, APIKey: "k", Model: "m", MaxAttempts: 5, RetryBaseDelay: time.Hour}, zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := client.ChatWithTools(ctx, []llm.Message{{Role: "user", Content: "q"}}, nil)
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second)
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+func TestChatWithTools_RetriesTimeouts(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			select {
+			case <-r.Context().Done():
+			case <-time.After(300 * time.Millisecond):
+			}
+			return
+		}
+		_, _ = w.Write([]byte(okReply))
+	}))
+	defer server.Close()
+
+	client := llm.NewClient(llm.Config{BaseURL: server.URL, APIKey: "k", Model: "m",
+		MaxAttempts: 2, RetryBaseDelay: time.Millisecond, RequestTimeout: 100 * time.Millisecond}, zap.NewNop())
+	resp, err := client.ChatWithTools(context.Background(), []llm.Message{{Role: "user", Content: "q"}}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", resp.Content)
+	assert.Equal(t, int32(2), calls.Load())
 }
